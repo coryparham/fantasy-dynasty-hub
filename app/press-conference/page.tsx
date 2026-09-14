@@ -3,14 +3,22 @@ import { getLeagueData } from "@/lib/sleeper";
 import { supabase, PressPost } from "@/lib/supabase";
 import PressConferenceClient from "./PressConferenceClient";
 
+// Disable Next.js static caching for this route
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function PressConferencePage() {
   const { teams } = await getLeagueData();
 
   // Fetch past posts from Supabase
-  const { data: posts } = await supabase
+  const { data: posts, error } = await supabase
     .from("press_conferences")
     .select("*")
     .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Supabase fetch error:", error);
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">

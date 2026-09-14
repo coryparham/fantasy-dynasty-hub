@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase, PressPost } from "@/lib/supabase";
 
 interface Team {
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function PressConferenceClient({ teams, initialPosts }: Props) {
+  const router = useRouter();
   const [posts, setPosts] = useState<PressPost[]>(initialPosts);
   const [selectedRosterId, setSelectedRosterId] = useState<number>(teams[0]?.rosterId || 1);
   const [category, setCategory] = useState<"Post-Game" | "Trash Talk" | "Trade Block">("Post-Game");
@@ -43,12 +45,14 @@ export default function PressConferenceClient({ teams, initialPosts }: Props) {
       .insert([newPost])
       .select();
 
-    if (!error && data) {
+    if (error) {
+      console.error("Error submitting post to Supabase:", error);
+      alert(`Submission failed: ${error.message}`);
+    } else if (data) {
       setPosts([data[0] as PressPost, ...posts]);
       setHeadline("");
       setContent("");
-    } else {
-      console.error("Error submitting post:", error);
+      router.refresh(); // Refresh Next.js server state
     }
 
     setIsSubmitting(false);
@@ -66,7 +70,7 @@ export default function PressConferenceClient({ teams, initialPosts }: Props) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* Submission Form */}
+      {/* Form */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 h-fit">
         <h2 className="text-xl font-bold text-slate-100 border-b border-slate-800 pb-3">
           Take the Podium
@@ -141,7 +145,7 @@ export default function PressConferenceClient({ teams, initialPosts }: Props) {
         </form>
       </div>
 
-      {/* Live Press Feed */}
+      {/* Feed */}
       <div className="lg:col-span-2 space-y-4">
         <h2 className="text-xl font-bold text-slate-100">Recent Press Releases</h2>
 
