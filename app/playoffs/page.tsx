@@ -32,12 +32,15 @@ export default async function PlayoffMachinePage() {
     return b.pointsFor - a.pointsFor;
   });
 
-  // Calculate win ranges for every team
+  // Calculate win ranges for every team with fallback for ties
   const teamsWithRanges = sortedTeams.map((team, index) => {
     const maxWins = team.wins + remainingWeeks;
     const minWins = team.wins;
+    const ties = (team as any).ties || 0;
+
     return {
       ...team,
+      ties,
       seed: index + 1,
       maxWins,
       minWins,
@@ -46,7 +49,6 @@ export default async function PlayoffMachinePage() {
 
   // Threshold wins for playoff boundary and bye seeds
   const lastPlayoffSeedWins = teamsWithRanges[playoffTeamsCount - 1]?.wins || 0;
-  const lastPlayoffSeedMaxWins = teamsWithRanges[playoffTeamsCount - 1]?.maxWins || 0;
   const cutoffTeamMaxWins = teamsWithRanges[playoffTeamsCount]?.maxWins || 0;
   const byeCutoffMaxWins = teamsWithRanges[2]?.maxWins || 0;
 
@@ -59,16 +61,11 @@ export default async function PlayoffMachinePage() {
       else if (team.seed <= playoffTeamsCount) status = "CLINCHED";
       else status = "ELIMINATED";
     } else {
-      // Clinched Bye if minimum wins exceed max possible wins of seed #3
       if (team.seed <= 2 && team.minWins > byeCutoffMaxWins) {
         status = "CLINCHED_BYE";
-      }
-      // Clinched Playoff spot if minimum wins exceed max wins of first team outside playoffs
-      else if (team.minWins > cutoffTeamMaxWins) {
+      } else if (team.minWins > cutoffTeamMaxWins) {
         status = "CLINCHED";
-      }
-      // Eliminated if max possible wins cannot catch current wins of last playoff seed
-      else if (team.maxWins < lastPlayoffSeedWins) {
+      } else if (team.maxWins < lastPlayoffSeedWins) {
         status = "ELIMINATED";
       }
     }
