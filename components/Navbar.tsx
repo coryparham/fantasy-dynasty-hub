@@ -16,6 +16,7 @@ export default function Navbar() {
           <Link href="/managers" className="hover:text-amber-400 transition">Managers</Link>
           <Link href="/records" className="hover:text-amber-400 transition">Record Book</Link>
           <Link href="/trophies" className="hover:text-amber-400 transition">Trophy Case</Link>
+          <Link href="/analytics/age-production" className="hover:text-amber-400 transition">Age Matrix</Link>
           <Link href="/constitution" className="hover:text-amber-400 transition">Constitution</Link>
         </div>
       </div>
