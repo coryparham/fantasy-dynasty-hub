@@ -11,6 +11,7 @@ export default function Navbar() {
         <div className="flex flex-wrap items-center space-x-6 text-sm font-medium text-slate-300">
           <Link href="/" className="hover:text-amber-400 transition">Standings</Link>
           <Link href="/matchups" className="hover:text-amber-400 transition">Matchups</Link>
+          <Link href="/playoffs" className="hover:text-amber-400 transition">Playoffs</Link>
           <Link href="/draft-capital" className="hover:text-amber-400 transition">Draft Capital</Link>
           <Link href="/trades" className="hover:text-amber-400 transition">Trade Feed</Link>
           <Link href="/managers" className="hover:text-amber-400 transition">Managers</Link>
