@@ -59,6 +59,44 @@ export interface AllTimeRecordsResult {
   highestSeasonWins: { name: string; avatar: string; wins: number; season: string };
 }
 
+export interface Player {
+  id: string;
+  name: string;
+  position: string;
+  team: string;
+  age: number;
+}
+
+export interface TradeTransaction {
+  id: string;
+  timestamp: number;
+  rosterIds: number[];
+  adds: Record<string, number>;
+  drops: Record<string, number>;
+  draftPicks: {
+    season: string;
+    round: number;
+    roster_id: number;
+    owner_id: number;
+    previous_owner_id: number;
+  }[];
+  waiverBudget: {
+    sender: number;
+    receiver: number;
+    amount: number;
+  }[];
+}
+
+export interface WaiverTransaction {
+  id: string;
+  timestamp: number;
+  rosterId: number;
+  addedPlayerId: string | null;
+  droppedPlayerId: string | null;
+  bid: number;
+  status: string;
+}
+
 export async function getLeagueData() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) throw new Error("NEXT_PUBLIC_SLEEPER_LEAGUE_ID is not set");
@@ -358,5 +396,87 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
     closestMatchup,
     highestSeasonPoints,
     highestSeasonWins,
+  };
+}
+
+let cachedPlayers: Record<string, Player> | null = null;
+
+export async function getPlayerMap(): Promise<Record<string, Player>> {
+  if (cachedPlayers) return cachedPlayers;
+  try {
+    const res = await fetch("https://sleepercdn.com/content/nfl/players.json", {
+      next: { revalidate: 86400 },
+    });
+    const rawData = await res.json();
+    const playerMap: Record<string, Player> = {};
+
+    Object.keys(rawData).forEach((id) => {
+      const p = rawData[id];
+      playerMap[id] = {
+        id,
+        name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Player",
+        position: p.position || "DEF",
+        team: p.team || "FA",
+        age: p.age || 0,
+      };
+    });
+
+    cachedPlayers = playerMap;
+    return playerMap;
+  } catch (err) {
+    console.error("Error fetching player database:", err);
+    return {};
+  }
+}
+
+export async function getTransactions(): Promise<{ trades: TradeTransaction[]; waivers: WaiverTransaction[] }> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) return { trades: [], waivers: [] };
+
+  const trades: TradeTransaction[] = [];
+  const waivers: WaiverTransaction[] = [];
+
+  const weekPromises = [];
+  for (let w = 1; w <= 18; w++) {
+    weekPromises.push(
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`, {
+        next: { revalidate: 1800 },
+      }).then((res) => (res.ok ? res.json() : []))
+    );
+  }
+
+  const results = await Promise.all(weekPromises);
+
+  results.flat().forEach((t: any) => {
+    if (t.status !== "complete") return;
+
+    if (t.type === "trade") {
+      trades.push({
+        id: t.transaction_id,
+        timestamp: t.status_updated,
+        rosterIds: t.roster_ids || [],
+        adds: t.adds || {},
+        drops: t.drops || {},
+        draftPicks: t.draft_picks || [],
+        waiverBudget: t.waiver_budget || [],
+      });
+    } else if (t.type === "waiver") {
+      const addedKeys = Object.keys(t.adds || {});
+      const droppedKeys = Object.keys(t.drops || {});
+      waivers.push({
+        id: t.transaction_id,
+        timestamp: t.status_updated,
+        rosterId: t.roster_ids?.[0],
+        addedPlayerId: addedKeys[0] || null,
+        droppedPlayerId: droppedKeys[0] || null,
+        bid: t.settings?.waiver_bid || 0,
+        status: t.status,
+      });
+    }
+  });
+
+  return {
+    trades: trades.sort((a, b) => b.timestamp - a.timestamp),
+    waivers: waivers.sort((a, b) => b.timestamp - a.timestamp),
   };
 }
