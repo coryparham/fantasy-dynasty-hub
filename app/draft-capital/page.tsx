@@ -8,8 +8,14 @@ export default async function DraftCapitalPage() {
   const rawTradedPicks = await getDraftPicks();
   const tradedPicks = Array.isArray(rawTradedPicks) ? rawTradedPicks : [];
 
-  const currentSeason = parseInt(league.season || "2024", 10);
-  const draftYears = [currentSeason, currentSeason + 1, currentSeason + 2];
+  const currentSeason = parseInt(league.season || "2026", 10);
+  
+  // If the league is active, completed, or post-season, the current year's draft has passed
+  const isDraftCompleted =
+    league.status !== "pre_draft" && league.status !== "drafting";
+  const startYear = isDraftCompleted ? currentSeason + 1 : currentSeason;
+  const draftYears = [startYear, startYear + 1, startYear + 2];
+
   const rounds = [1, 2, 3, 4];
 
   const getTeam = (rosterId: number) =>
@@ -23,7 +29,7 @@ export default async function DraftCapitalPage() {
             Draft Capital Tracker
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Current pick stashes, acquired assets, and traded draft capital across the league
+            Upcoming draft pick stashes, acquired assets, and traded draft capital across the league
           </p>
         </div>
 
