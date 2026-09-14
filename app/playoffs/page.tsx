@@ -8,9 +8,9 @@ export default async function PlayoffMachinePage() {
   const playoffTeamsCount = league.settings?.playoff_teams || 6;
   const playoffStartWeek = league.settings?.playoff_week_start || 15;
   const currentWeek = league.settings?.leg || 1;
+  const hasMedianMatch = league.settings?.league_average_match === 1;
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
 
-  // Fetch upcoming matchups for remaining regular season weeks
   const remainingMatchups: any[] = [];
 
   for (let w = currentWeek; w < playoffStartWeek; w++) {
@@ -21,7 +21,6 @@ export default async function PlayoffMachinePage() {
       const matchups = await res.json();
 
       if (Array.isArray(matchups)) {
-        // Group Sleeper matchups by matchup_id
         const grouped: Record<number, number[]> = {};
         matchups.forEach((m: any) => {
           if (!grouped[m.matchup_id]) grouped[m.matchup_id] = [];
@@ -52,7 +51,7 @@ export default async function PlayoffMachinePage() {
             Interactive Playoff Machine
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Toggle game winners for weeks {currentWeek} through {playoffStartWeek - 1} to simulate playoff seeding outcomes
+            Toggle game winners and median points bonuses to simulate playoff seeding outcomes
           </p>
         </div>
 
@@ -62,6 +61,7 @@ export default async function PlayoffMachinePage() {
           playoffTeamsCount={playoffTeamsCount}
           playoffStartWeek={playoffStartWeek}
           currentWeek={currentWeek}
+          hasMedianMatch={hasMedianMatch}
         />
       </div>
     </main>
