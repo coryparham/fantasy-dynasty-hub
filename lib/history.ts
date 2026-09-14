@@ -20,17 +20,15 @@ export async function getHistoricalData(): Promise<SeasonHistory[]> {
   // Walk backward through past seasons up to 10 years
   while (leagueId && depth < 10) {
     try {
-      const [leagueRes, usersRes, rostersRes] = await Promise.all([
-        fetch(`${BASE_URL}/league/${leagueId}`, { next: { revalidate: 86400 } }),
-        fetch(`${BASE_URL}/league/${leagueId}/users`, { next: { revalidate: 86400 } }),
-        fetch(`${BASE_URL}/league/${leagueId}/rosters`, { next: { revalidate: 86400 } }),
-      ]);
+      const leagueRes: Response = await fetch(`${BASE_URL}/league/${leagueId}`, { next: { revalidate: 86400 } });
+      const usersRes: Response = await fetch(`${BASE_URL}/league/${leagueId}/users`, { next: { revalidate: 86400 } });
+      const rostersRes: Response = await fetch(`${BASE_URL}/league/${leagueId}/rosters`, { next: { revalidate: 86400 } });
 
-      const league = await leagueRes.json();
+      const league: any = await leagueRes.json();
       if (!league || league === "null" || !league.season) break;
 
-      const users = await usersRes.json();
-      const rosters = await rostersRes.json();
+      const users: any = await usersRes.json();
+      const rosters: any = await rostersRes.json();
 
       seasons.push({
         leagueId,
