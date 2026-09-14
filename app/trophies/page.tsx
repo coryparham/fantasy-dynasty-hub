@@ -1,52 +1,88 @@
 // app/trophies/page.tsx
+import { getLeagueHistory } from "@/lib/sleeper";
 
-interface HistoryItem {
-  year: number;
-  champion: string;
-  runnerUp: string;
-  sacko: string;
-  punishment: string;
-}
+export const dynamic = "force-dynamic";
 
-// Edit your historical league winners & punishments here
-const LEAGUE_HISTORY: HistoryItem[] = [
-  {
-    year: 2025,
-    champion: "Team Alpha",
-    runnerUp: "Team Bravo",
-    sacko: "Team Charlie",
-    punishment: "24 Hours in Waffle House",
-  },
-];
+export default async function TrophiesPage() {
+  const history = await getLeagueHistory();
 
-export default function TrophyPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
       <div className="max-w-5xl mx-auto space-y-8">
-        <h1 className="text-3xl font-extrabold text-amber-500">Hall of Fame & Trophy Case</h1>
-
-        <div className="grid grid-cols-1 gap-6">
-          {LEAGUE_HISTORY.map((item) => (
-            <div key={item.year} className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-              <h2 className="text-2xl font-bold text-amber-400">{item.year} Season</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-950 p-4 rounded-lg border border-amber-500/30">
-                  <span className="text-xs uppercase text-amber-500 font-bold">Champion</span>
-                  <p className="text-lg font-bold text-slate-100">{item.champion}</p>
-                </div>
-                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                  <span className="text-xs uppercase text-slate-400 font-bold">Runner-Up</span>
-                  <p className="text-lg font-bold text-slate-300">{item.runnerUp}</p>
-                </div>
-                <div className="bg-slate-950 p-4 rounded-lg border border-red-500/30">
-                  <span className="text-xs uppercase text-red-400 font-bold">Sacko Winner</span>
-                  <p className="text-lg font-bold text-red-300">{item.sacko}</p>
-                  <p className="text-xs text-slate-400 mt-1">Punishment: {item.punishment}</p>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Hall of Fame & Trophy Case
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Historical champions and playoff outcomes across all past Sleeper seasons
+          </p>
         </div>
+
+        {history.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+            No historical season data found.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {history.map((season) => (
+              <div
+                key={season.leagueId}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 shadow-lg"
+              >
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <h2 className="text-xl font-extrabold text-amber-400">
+                    {season.season} Season
+                  </h2>
+                  <span className="text-xs font-mono text-slate-500">
+                    ID: {season.leagueId.slice(0, 8)}...
+                  </span>
+                </div>
+
+                {/* Champion Card */}
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex items-center space-x-4">
+                  {season.champion ? (
+                    <>
+                      <img
+                        src={season.champion.avatar}
+                        alt=""
+                        className="w-12 h-12 rounded-full border-2 border-amber-400 object-cover"
+                      />
+                      <div>
+                        <span className="text-xs uppercase tracking-wider font-extrabold text-amber-400 block">
+                          🏆 League Champion
+                        </span>
+                        <h3 className="text-lg font-bold text-slate-100">
+                          {season.champion.name}
+                        </h3>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400">Playoff bracket data pending or unfinalized</p>
+                  )}
+                </div>
+
+                {/* Runner Up Card */}
+                {season.runnerUp && (
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center space-x-3">
+                    <img
+                      src={season.runnerUp.avatar}
+                      alt=""
+                      className="w-8 h-8 rounded-full border border-slate-700 object-cover"
+                    />
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                        🥈 Runner-Up
+                      </span>
+                      <h4 className="text-sm font-semibold text-slate-200">
+                        {season.runnerUp.name}
+                      </h4>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );
