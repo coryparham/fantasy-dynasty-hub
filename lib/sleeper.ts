@@ -49,6 +49,16 @@ export interface AllTimeManagerStats {
   seasons: number;
 }
 
+export interface AllTimeRecordsResult {
+  leaderboard: AllTimeManagerStats[];
+  highestSingleGameScore: { name: string; avatar: string; points: number; season: string; week: number };
+  lowestSingleGameScore: { name: string; avatar: string; points: number; season: string; week: number } | null;
+  biggestBlowout: GameRecord | null;
+  closestMatchup: GameRecord | null;
+  highestSeasonPoints: { name: string; avatar: string; points: number; season: string };
+  highestSeasonWins: { name: string; avatar: string; wins: number; season: string };
+}
+
 export async function getLeagueData() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) throw new Error("NEXT_PUBLIC_SLEEPER_LEAGUE_ID is not set");
@@ -178,7 +188,7 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
   return history;
 }
 
-export async function getAllTimeRecords() {
+export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
   let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
 
   const allTimeStats: Record<string, AllTimeManagerStats> = {};
@@ -229,7 +239,6 @@ export async function getAllTimeRecords() {
         const ties = r.settings?.ties || 0;
         const pointsFor = Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`);
 
-        // Track single season records
         if (pointsFor > highestSeasonPoints.points) {
           highestSeasonPoints = { name: ownerInfo.name, avatar: ownerInfo.avatar, points: pointsFor, season: league.season };
         }
@@ -237,7 +246,6 @@ export async function getAllTimeRecords() {
           highestSeasonWins = { name: ownerInfo.name, avatar: ownerInfo.avatar, wins, season: league.season };
         }
 
-        // Aggregate All-Time Totals
         if (!allTimeStats[ownerId]) {
           allTimeStats[ownerId] = {
             ownerId,
@@ -257,12 +265,10 @@ export async function getAllTimeRecords() {
         allTimeStats[ownerId].ties += ties;
         allTimeStats[ownerId].pointsFor += pointsFor;
         allTimeStats[ownerId].seasons += 1;
-        // Keep updated name/avatar from latest season
         allTimeStats[ownerId].name = ownerInfo.name;
         allTimeStats[ownerId].avatar = ownerInfo.avatar;
       });
 
-      // Fetch week matchups for game-level records
       const playStartWeek = league.settings?.playoff_week_start || 15;
       const weekPromises = [];
       for (let w = 1; w < playStartWeek; w++) {
@@ -279,7 +285,6 @@ export async function getAllTimeRecords() {
         if (!weekObj || !Array.isArray(weekObj.data)) return;
         const { week, data: matchups } = weekObj;
 
-        // Group by matchup_id
         const matchupGroups: Record<number, any[]> = {};
         matchups.forEach((m: any) => {
           if (m.matchup_id) {
@@ -287,7 +292,6 @@ export async function getAllTimeRecords() {
             matchupGroups[m.matchup_id].push(m);
           }
 
-          // Single-game score checks
           const owner = rosterMap[m.roster_id];
           if (owner && m.points > 0) {
             if (m.points > highestSingleGameScore.points) {
@@ -299,7 +303,6 @@ export async function getAllTimeRecords() {
           }
         });
 
-        // Calculate matchup margins
         Object.values(matchupGroups).forEach((pair) => {
           if (pair.length === 2) {
             const [teamA, teamB] = pair;
@@ -341,7 +344,6 @@ export async function getAllTimeRecords() {
     }
   }
 
-  // Calculate Win Percentages
   const leaderboard = Object.values(allTimeStats).map((m) => {
     const totalGames = m.wins + m.losses + m.ties;
     const winPct = totalGames > 0 ? (m.wins / totalGames) * 100 : 0;
