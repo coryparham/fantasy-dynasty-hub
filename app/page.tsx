@@ -1,10 +1,9 @@
-// app/page.tsx
 import { getLeagueData } from "@/lib/sleeper";
+import Link from "next/link";
 
 export default async function HomePage() {
   const { league, teams } = await getLeagueData();
 
-  // Sort teams by wins, then points for
   const standings = [...teams].sort((a, b) => {
     if (b.wins !== a.wins) return b.wins - a.wins;
     return b.pointsFor - a.pointsFor;
@@ -13,8 +12,6 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
-        
-        {/* Header */}
         <header className="border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-4xl font-extrabold tracking-tight text-amber-500">
@@ -32,7 +29,6 @@ export default async function HomePage() {
           </a>
         </header>
 
-        {/* Standings Table */}
         <section className="bg-slate-900 rounded-xl border border-slate-800 p-6 shadow-xl">
           <h2 className="text-2xl font-bold mb-4 text-slate-200">League Standings</h2>
           <div className="overflow-x-auto">
@@ -49,13 +45,20 @@ export default async function HomePage() {
                 {standings.map((team, index) => (
                   <tr key={team.rosterId} className="hover:bg-slate-800/40 transition">
                     <td className="py-4 px-4 font-mono text-slate-500">#{index + 1}</td>
-                    <td className="py-4 px-4 flex items-center space-x-3">
-                      <img
-                        src={team.avatar}
-                        alt={team.name}
-                        className="w-8 h-8 rounded-full border border-slate-700"
-                      />
-                      <span className="font-semibold text-slate-100">{team.name}</span>
+                    <td className="py-4 px-4">
+                      <Link 
+                        href={`/teams/${team.rosterId}`}
+                        className="flex items-center space-x-3 group"
+                      >
+                        <img
+                          src={team.avatar}
+                          alt={team.name}
+                          className="w-8 h-8 rounded-full border border-slate-700 group-hover:border-amber-500 transition"
+                        />
+                        <span className="font-semibold text-slate-100 group-hover:text-amber-400 transition">
+                          {team.name}
+                        </span>
+                      </Link>
                     </td>
                     <td className="py-4 px-4 text-center font-mono">
                       {team.wins}-{team.losses}
@@ -69,7 +72,6 @@ export default async function HomePage() {
             </table>
           </div>
         </section>
-
       </div>
     </main>
   );
