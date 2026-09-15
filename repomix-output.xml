@@ -1,0 +1,3025 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  analytics/
+    age-production/
+      page.tsx
+  api/
+    recap/
+      route.ts
+  constitution/
+    page.tsx
+  draft-capital/
+    page.tsx
+  faab/
+    page.tsx
+  managers/
+    page.tsx
+  matchups/
+    page.tsx
+  playoffs/
+    page.tsx
+    PlayoffMachineClient.tsx
+  press-conference/
+    page.tsx
+    PressConferenceClient.tsx
+  records/
+    page.tsx
+  teams/
+    [id]/
+      page.tsx
+    page.tsx
+  trades/
+    page.tsx
+  trophies/
+    page.tsx
+  favicon.ico
+  globals.css
+  layout.tsx
+  page.tsx
+components/
+  Navbar.tsx
+lib/
+  fantasycalc.ts
+  history.ts
+  sleeper.ts
+  supabase.ts
+public/
+  file.svg
+  globe.svg
+  next.svg
+  vercel.svg
+  window.svg
+.gitignore
+AGENTS.md
+CLAUDE.md
+eslint.config.mjs
+next.config.ts
+package.json
+postcss.config.mjs
+README.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/analytics/age-production/page.tsx">
+// app/analytics/age-production/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+
+interface TeamMetrics {
+  rosterId: number;
+  name: string;
+  avatar: string;
+  pointsFor: number;
+  avgAge: number;
+  quadrant: "Contend Now" | "Golden Window" | "Rebuilding" | "Danger Zone";
+}
+
+export default async function AgeProductionPage() {
+  const { teams } = await getLeagueData();
+
+  // Fetch full Sleeper player database to extract ages
+  const playersRes = await fetch("https://api.sleeper.app/v1/players/nfl", {
+    next: { revalidate: 86400 }, // Cache player dictionary for 24 hours
+  });
+  const allPlayers = await playersRes.json();
+
+  const currentYear = new Date().getFullYear();
+
+  // Process roster ages and points
+  const teamMetrics: TeamMetrics[] = teams.map((team) => {
+    let totalAge = 0;
+    let playerCount = 0;
+
+    team.players.forEach((playerId) => {
+      const player = allPlayers[playerId];
+      if (player && player.age) {
+        totalAge += player.age;
+        playerCount++;
+      }
+    });
+
+    const avgAge = playerCount > 0 ? totalAge / playerCount : 25;
+    const pointsFor = team.pointsFor || 0;
+
+    return {
+      rosterId: team.rosterId,
+      name: team.name,
+      avatar: team.avatar,
+      pointsFor,
+      avgAge: Number(avgAge.toFixed(1)),
+      quadrant: "Contend Now", // Placeholder, calculated below
+    };
+  });
+
+  // Calculate league median age and median points for quadrant boundaries
+  const sortedAges = [...teamMetrics].map((t) => t.avgAge).sort((a, b) => a - b);
+  const sortedPoints = [...teamMetrics].map((t) => t.pointsFor).sort((a, b) => a - b);
+  
+  const midIndex = Math.floor(teamMetrics.length / 2);
+  const medianAge = sortedAges[midIndex] || 25.5;
+  const medianPoints = sortedPoints[midIndex] || 1000;
+
+  // Assign quadrants
+  teamMetrics.forEach((t) => {
+    const isHighPoints = t.pointsFor >= medianPoints;
+    const isYoung = t.avgAge < medianAge;
+
+    if (isHighPoints && !isYoung) t.quadrant = "Contend Now";
+    else if (isHighPoints && isYoung) t.quadrant = "Golden Window";
+    else if (!isHighPoints && isYoung) t.quadrant = "Rebuilding";
+    else t.quadrant = "Danger Zone";
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Age vs. Production Matrix
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Analyzing roster longevity against current season scoring outputs
+          </p>
+        </div>
+
+        {/* 2x2 Quadrant Display Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Top Left: Golden Window */}
+          <div className="bg-slate-900/90 border-2 border-emerald-500/40 p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-lg font-bold text-emerald-400">🏆 Golden Window</h2>
+              <span className="text-xs text-slate-400">High Points / Low Age</span>
+            </div>
+            <div className="space-y-3">
+              {teamMetrics
+                .filter((t) => t.quadrant === "Golden Window")
+                .map((t) => (
+                  <TeamCard key={t.rosterId} team={t} />
+                ))}
+            </div>
+          </div>
+
+          {/* Top Right: Contend Now */}
+          <div className="bg-slate-900/90 border-2 border-amber-500/40 p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-lg font-bold text-amber-400">⚡ Contend Now</h2>
+              <span className="text-xs text-slate-400">High Points / High Age</span>
+            </div>
+            <div className="space-y-3">
+              {teamMetrics
+                .filter((t) => t.quadrant === "Contend Now")
+                .map((t) => (
+                  <TeamCard key={t.rosterId} team={t} />
+                ))}
+            </div>
+          </div>
+
+          {/* Bottom Left: Rebuilding */}
+          <div className="bg-slate-900/90 border-2 border-blue-500/40 p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-lg font-bold text-blue-400">🌱 Rebuilding</h2>
+              <span className="text-xs text-slate-400">Low Points / Low Age</span>
+            </div>
+            <div className="space-y-3">
+              {teamMetrics
+                .filter((t) => t.quadrant === "Rebuilding")
+                .map((t) => (
+                  <TeamCard key={t.rosterId} team={t} />
+                ))}
+            </div>
+          </div>
+
+          {/* Bottom Right: Danger Zone */}
+          <div className="bg-slate-900/90 border-2 border-red-500/40 p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-lg font-bold text-red-400">⚠️ Danger Zone</h2>
+              <span className="text-xs text-slate-400">Low Points / High Age</span>
+            </div>
+            <div className="space-y-3">
+              {teamMetrics
+                .filter((t) => t.quadrant === "Danger Zone")
+                .map((t) => (
+                  <TeamCard key={t.rosterId} team={t} />
+                ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function TeamCard({ team }: { team: TeamMetrics }) {
+  return (
+    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 flex justify-between items-center">
+      <div className="flex items-center space-x-3">
+        <img
+          src={team.avatar}
+          alt={team.name}
+          className="w-8 h-8 rounded-full border border-slate-700 object-cover"
+        />
+        <span className="font-semibold text-sm">{team.name}</span>
+      </div>
+      <div className="text-right text-xs font-mono space-x-3">
+        <span className="text-slate-400">Avg Age: <strong className="text-slate-200">{team.avgAge}</strong></span>
+        <span className="text-amber-400 font-bold">{team.pointsFor.toFixed(1)} pts</span>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/api/recap/route.ts">
+// app/api/recap/route.ts
+import { NextResponse } from "next/server";
+
+export async function POST(req: Request) {
+  try {
+    const { matchupData, week } = await req.json();
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "API Key missing" }, { status: 500 });
+    }
+
+    const prompt = `You are an opinionated, funny, and sarcastic fantasy football analyst writing a recap for Week ${week} of a dynasty league. 
+    Here is the raw matchup data: ${JSON.stringify(matchupData)}
+    
+    Write a 3-paragraph witty summary including:
+    1. Fraud of the Week (Winner with bad stats or lowest scoring winner)
+    2. Heartbreak Award (Highest scoring loser)
+    3. Bench Blunder (Team that left key players on the bench)
+    Keep it playful, entertaining, and bold. Use HTML tags like <h3> and <p> for styling.`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    const data = await res.json();
+    const recapText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Failed to generate recap.";
+
+    return NextResponse.json({ recap: recapText });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to fetch recap" }, { status: 500 });
+  }
+}
+</file>
+
+<file path="app/constitution/page.tsx">
+// app/constitution/page.tsx
+const RULES = [
+  { category: "Dues & Payouts", content: "$100/year due prior to rookie draft. 1st: $800, 2nd: $300, 3rd: $100." },
+  { category: "Rookie Draft", content: "3-round linear draft based on Optimum Points Possible (Max PF) for non-playoff teams." },
+  { category: "Trade Deadline", content: "Week 11 kickoff. No offseason trade restrictions once dues are paid." },
+];
+
+export default function ConstitutionPage() {
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <h1 className="text-3xl font-extrabold text-amber-500">League Constitution</h1>
+        <div className="space-y-4">
+          {RULES.map((rule) => (
+            <div key={rule.category} className="bg-slate-900 border border-slate-800 p-6 rounded-xl">
+              <h2 className="text-xl font-bold text-amber-400 mb-2">{rule.category}</h2>
+              <p className="text-slate-300 leading-relaxed">{rule.content}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/faab/page.tsx">
+// app/faab/page.tsx
+import { getLeagueData, getPlayerMap, getTransactions } from "@/lib/sleeper";
+import Link from "next/link";
+
+export const dynamic = "force-dynamic";
+
+export default async function FaabPage() {
+  const [{ teams, league }, playerMap, { waivers }] = await Promise.all([
+    getLeagueData(),
+    getPlayerMap(),
+    getTransactions(),
+  ]);
+
+  const totalFaab = league.settings?.waiver_budget || 100;
+  const getTeam = (rosterId: number) => teams.find((t) => t.rosterId === rosterId);
+
+  // Compute FAAB spent per team from waivers
+  const spentMap: Record<number, number> = {};
+  waivers.forEach((w) => {
+    if (w.status === "complete" && w.rosterId) {
+      spentMap[w.rosterId] = (spentMap[w.rosterId] || 0) + w.bid;
+    }
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">FAAB & Waiver Tracker</h1>
+          <p className="text-slate-400 text-sm mt-1">Remaining waiver budgets and recent transaction claims</p>
+        </div>
+
+        {/* FAAB Balances Overview */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+          <h2 className="text-lg font-bold text-slate-100">Manager FAAB Balances</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {teams.map((team) => {
+              const spent = spentMap[team.rosterId] || 0;
+              const remaining = Math.max(0, totalFaab - spent);
+              const pct = Math.round((remaining / totalFaab) * 100);
+
+              return (
+                <div key={team.rosterId} className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
+                  <Link href={`/teams/${team.rosterId}`} className="flex items-center space-x-2">
+                    <img src={team.avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
+                    <span className="font-bold text-xs truncate hover:text-amber-400">{team.name}</span>
+                  </Link>
+                  <div className="flex justify-between items-baseline text-xs pt-1">
+                    <span className="text-slate-400">Remaining:</span>
+                    <span className="font-mono font-bold text-amber-400">${remaining} / ${totalFaab}</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Waiver Log */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+          <h2 className="text-lg font-bold text-slate-100">Recent Waiver Claims</h2>
+          {waivers.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">No waiver claims processed yet</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Manager</th>
+                    <th className="py-3 px-4">Added Player</th>
+                    <th className="py-3 px-4">Dropped Player</th>
+                    <th className="py-3 px-4 text-right">Bid</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {waivers.slice(0, 20).map((w) => {
+                    const manager = getTeam(w.rosterId);
+                    const added = w.addedPlayerId ? playerMap[w.addedPlayerId] : null;
+                    const dropped = w.droppedPlayerId ? playerMap[w.droppedPlayerId] : null;
+
+                    return (
+                      <tr key={w.id} className="hover:bg-slate-800/30">
+                        <td className="py-3 px-4 font-semibold text-slate-100">
+                          {manager ? manager.name : `Team ${w.rosterId}`}
+                        </td>
+                        <td className="py-3 px-4 text-emerald-400">
+                          {added ? `${added.name} (${added.position} - ${added.team})` : "—"}
+                        </td>
+                        <td className="py-3 px-4 text-rose-400">
+                          {dropped ? `${dropped.name} (${dropped.position} - ${dropped.team})` : "—"}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-amber-400">
+                          ${w.bid}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/matchups/page.tsx">
+// app/matchups/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+
+export default async function MatchupsPage() {
+  const { league, teams } = await getLeagueData();
+  const currentWeek = league.settings.leg || 1;
+
+  const res = await fetch(
+    `https://api.sleeper.app/v1/league/${process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID}/matchups/${currentWeek}`,
+    { next: { revalidate: 300 } }
+  );
+  const matchupsRaw = await res.json();
+
+  // Group matchups by matchup_id
+  const matchupsMap: Record<number, any[]> = {};
+  matchupsRaw.forEach((m: any) => {
+    if (!matchupsMap[m.matchup_id]) matchupsMap[m.matchup_id] = [];
+    matchupsMap[m.matchup_id].push(m);
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <h1 className="text-3xl font-extrabold text-amber-500">
+          Week {currentWeek} Matchups
+        </h1>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {Object.entries(matchupsMap).map(([id, pair]) => {
+            const teamA = teams.find((t) => t.rosterId === pair[0]?.roster_id);
+            const teamB = teams.find((t) => t.rosterId === pair[1]?.roster_id);
+
+            return (
+              <div key={id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+                {/* Team A */}
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-3">
+                    <img src={teamA?.avatar} className="w-10 h-10 rounded-full border" alt="" />
+                    <span className="font-bold">{teamA?.name}</span>
+                  </div>
+                  <span className="text-2xl font-mono font-bold text-amber-400">
+                    {pair[0]?.points?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+
+                <div className="text-center text-xs font-semibold text-slate-500 uppercase tracking-widest border-y border-slate-800/60 py-1">
+                  VS
+                </div>
+
+                {/* Team B */}
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-3">
+                    <img src={teamB?.avatar} className="w-10 h-10 rounded-full border" alt="" />
+                    <span className="font-bold">{teamB?.name}</span>
+                  </div>
+                  <span className="text-2xl font-mono font-bold text-amber-400">
+                    {pair[1]?.points?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/teams/[id]/page.tsx">
+// app/teams/[id]/page.tsx
+import { getLeagueData, getPlayerMap, Player } from "@/lib/sleeper";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default async function TeamDetailPage({ params }: PageProps) {
+  const { id } = await params;
+  const rosterId = parseInt(id, 10);
+
+  const [{ teams }, playerMap] = await Promise.all([
+    getLeagueData(),
+    getPlayerMap(),
+  ]);
+
+  const team = teams.find((t) => t.rosterId === rosterId);
+  if (!team) notFound();
+
+  // Map roster player IDs to full player details
+  const rosterPlayers: Player[] = team.players
+    .map((pid) => playerMap[pid])
+    .filter(Boolean);
+
+  // Group by position
+  const positions = ["QB", "RB", "WR", "TE", "K", "DEF"];
+  const depthChart: Record<string, Player[]> = {};
+  positions.forEach((pos) => {
+    depthChart[pos] = rosterPlayers.filter((p) => p.position === pos);
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <Link href="/teams" className="text-xs text-amber-500 hover:underline">
+          ← Back to All Teams
+        </Link>
+
+        {/* Team Header */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex items-center space-x-5">
+          <img
+            src={team.avatar}
+            alt=""
+            className="w-20 h-20 rounded-full border-2 border-amber-500 object-cover"
+          />
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-100">{team.name}</h1>
+            <p className="text-sm text-slate-400">Roster #{team.rosterId}</p>
+            <div className="flex space-x-4 mt-2 text-xs font-mono">
+              <span className="bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                W-L: <strong className="text-amber-400">{team.wins}-{team.losses}</strong>
+              </span>
+              <span className="bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                Points: <strong className="text-amber-400">{team.pointsFor.toFixed(2)}</strong>
+              </span>
+              <span className="bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                Players: <strong className="text-amber-400">{rosterPlayers.length}</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Positional Depth Charts */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {positions.map((pos) => {
+            const players = depthChart[pos] || [];
+            return (
+              <div key={pos} className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                  <h2 className="font-extrabold text-amber-400 text-sm tracking-wider">{pos}</h2>
+                  <span className="text-xs text-slate-500 font-mono">{players.length} Players</span>
+                </div>
+
+                {players.length === 0 ? (
+                  <p className="text-xs text-slate-600 italic">No players at this position</p>
+                ) : (
+                  <div className="divide-y divide-slate-800/60">
+                    {players.map((player) => (
+                      <div key={player.id} className="py-2 flex justify-between items-center text-xs">
+                        <div>
+                          <span className="font-semibold text-slate-200">{player.name}</span>
+                          <span className="text-slate-500 ml-2 font-mono">{player.team}</span>
+                        </div>
+                        {player.age > 0 && (
+                          <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded">
+                            {player.age} yrs
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/teams/page.tsx">
+// app/teams/page.tsx
+import Link from "next/link";
+import { getLeagueData } from "@/lib/sleeper";
+
+export const dynamic = "force-dynamic";
+
+export default async function TeamsDirectoryPage() {
+  const { teams } = await getLeagueData();
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">League Franchises</h1>
+          <p className="text-slate-400 text-sm mt-1">Select a team to view detailed rosters, depth charts, and assets</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {teams.map((team) => (
+            <Link
+              key={team.rosterId}
+              href={`/teams/${team.rosterId}`}
+              className="bg-slate-900 border border-slate-800 hover:border-amber-500/50 rounded-xl p-5 transition-all flex items-center space-x-4 group"
+            >
+              <img
+                src={team.avatar}
+                alt=""
+                className="w-14 h-14 rounded-full border border-slate-700 group-hover:border-amber-400 object-cover"
+              />
+              <div className="overflow-hidden">
+                <h2 className="font-bold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
+                  {team.name}
+                </h2>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                  Record: {team.wins}-{team.losses}{team.ties > 0 ? `-${team.ties}` : ""}
+                </p>
+                <p className="text-xs text-amber-500/80 font-mono mt-0.5">
+                  {team.pointsFor.toFixed(2)} PF
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/globals.css">
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+</file>
+
+<file path="lib/supabase.ts">
+// lib/supabase.ts
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export interface PressPost {
+  id: string;
+  created_at: string;
+  roster_id: number;
+  manager_name: string;
+  category: "Post-Game" | "Trash Talk" | "Trade Block";
+  headline: string;
+  content: string;
+}
+</file>
+
+<file path="public/file.svg">
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
+</file>
+
+<file path="public/globe.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g clip-path="url(#a)"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.27 14.1a6.5 6.5 0 0 0 3.67-3.45q-1.24.21-2.7.34-.31 1.83-.97 3.1M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.48-1.52a7 7 0 0 1-.96 0H7.5a4 4 0 0 1-.84-1.32q-.38-.89-.63-2.08a40 40 0 0 0 3.92 0q-.25 1.2-.63 2.08a4 4 0 0 1-.84 1.31zm2.94-4.76q1.66-.15 2.95-.43a7 7 0 0 0 0-2.58q-1.3-.27-2.95-.43a18 18 0 0 1 0 3.44m-1.27-3.54a17 17 0 0 1 0 3.64 39 39 0 0 1-4.3 0 17 17 0 0 1 0-3.64 39 39 0 0 1 4.3 0m1.1-1.17q1.45.13 2.69.34a6.5 6.5 0 0 0-3.67-3.44q.65 1.26.98 3.1M8.48 1.5l.01.02q.41.37.84 1.31.38.89.63 2.08a40 40 0 0 0-3.92 0q.25-1.2.63-2.08a4 4 0 0 1 .85-1.32 7 7 0 0 1 .96 0m-2.75.4a6.5 6.5 0 0 0-3.67 3.44 29 29 0 0 1 2.7-.34q.31-1.83.97-3.1M4.58 6.28q-1.66.16-2.95.43a7 7 0 0 0 0 2.58q1.3.27 2.95.43a18 18 0 0 1 0-3.44m.17 4.71q-1.45-.12-2.69-.34a6.5 6.5 0 0 0 3.67 3.44q-.65-1.27-.98-3.1" fill="#666"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h16v16H0z"/></clipPath></defs></svg>
+</file>
+
+<file path="public/next.svg">
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 394 80"><path fill="#000" d="M262 0h68.5v12.7h-27.2v66.6h-13.6V12.7H262V0ZM149 0v12.7H94v20.4h44.3v12.6H94v21h55v12.6H80.5V0h68.7zm34.3 0h-17.8l63.8 79.4h17.9l-32-39.7 32-39.6h-17.9l-23 28.6-23-28.6zm18.3 56.7-9-11-27.1 33.7h17.8l18.3-22.7z"/><path fill="#000" d="M81 79.3 17 0H0v79.3h13.6V17l50.2 62.3H81Zm252.6-.4c-1 0-1.8-.4-2.5-1s-1.1-1.6-1.1-2.6.3-1.8 1-2.5 1.6-1 2.6-1 1.8.3 2.5 1a3.4 3.4 0 0 1 .6 4.3 3.7 3.7 0 0 1-3 1.8zm23.2-33.5h6v23.3c0 2.1-.4 4-1.3 5.5a9.1 9.1 0 0 1-3.8 3.5c-1.6.8-3.5 1.3-5.7 1.3-2 0-3.7-.4-5.3-1s-2.8-1.8-3.7-3.2c-.9-1.3-1.4-3-1.4-5h6c.1.8.3 1.6.7 2.2s1 1.2 1.6 1.5c.7.4 1.5.5 2.4.5 1 0 1.8-.2 2.4-.6a4 4 0 0 0 1.6-1.8c.3-.8.5-1.8.5-3V45.5zm30.9 9.1a4.4 4.4 0 0 0-2-3.3 7.5 7.5 0 0 0-4.3-1.1c-1.3 0-2.4.2-3.3.5-.9.4-1.6 1-2 1.6a3.5 3.5 0 0 0-.3 4c.3.5.7.9 1.3 1.2l1.8 1 2 .5 3.2.8c1.3.3 2.5.7 3.7 1.2a13 13 0 0 1 3.2 1.8 8.1 8.1 0 0 1 3 6.5c0 2-.5 3.7-1.5 5.1a10 10 0 0 1-4.4 3.5c-1.8.8-4.1 1.2-6.8 1.2-2.6 0-4.9-.4-6.8-1.2-2-.8-3.4-2-4.5-3.5a10 10 0 0 1-1.7-5.6h6a5 5 0 0 0 3.5 4.6c1 .4 2.2.6 3.4.6 1.3 0 2.5-.2 3.5-.6 1-.4 1.8-1 2.4-1.7a4 4 0 0 0 .8-2.4c0-.9-.2-1.6-.7-2.2a11 11 0 0 0-2.1-1.4l-3.2-1-3.8-1c-2.8-.7-5-1.7-6.6-3.2a7.2 7.2 0 0 1-2.4-5.7 8 8 0 0 1 1.7-5 10 10 0 0 1 4.3-3.5c2-.8 4-1.2 6.4-1.2 2.3 0 4.4.4 6.2 1.2 1.8.8 3.2 2 4.3 3.4 1 1.4 1.5 3 1.5 5h-5.8z"/></svg>
+</file>
+
+<file path="public/vercel.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1155 1000"><path d="m577.3 0 577.4 1000H0z" fill="#fff"/></svg>
+</file>
+
+<file path="public/window.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
+</file>
+
+<file path="AGENTS.md">
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
+</file>
+
+<file path="CLAUDE.md">
+@AGENTS.md
+</file>
+
+<file path="eslint.config.mjs">
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+</file>
+
+<file path="postcss.config.mjs">
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+</file>
+
+<file path="README.md">
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+</file>
+
+<file path="app/managers/page.tsx">
+// app/managers/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+import { getDynastyValues } from "@/lib/fantasycalc";
+
+export default async function ManagersPage() {
+  // Fetch league rosters and fantasy values in parallel
+  const [{ teams }, valueMap] = await Promise.all([
+    getLeagueData(),
+    getDynastyValues(),
+  ]);
+
+  // Calculate total roster value for each manager
+  const teamsWithValues = teams.map((team) => {
+    const totalValue = team.players.reduce((sum, playerId) => {
+      return sum + (valueMap[playerId] || 0);
+    }, 0);
+
+    return {
+      ...team,
+      totalValue,
+    };
+  });
+
+  // Calculate average league value to split Contenders vs. Rebuilders
+  const avgValue =
+    teamsWithValues.reduce((sum, t) => sum + t.totalValue, 0) /
+      teamsWithValues.length || 1;
+
+  // Sort managers by total roster value descending
+  const sortedTeams = [...teamsWithValues].sort(
+    (a, b) => b.totalValue - a.totalValue
+  );
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
+          <div>
+            <h1 className="text-3xl font-extrabold text-amber-500">
+              Manager Profiles & Dynasty Rankings
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">
+              Live market valuations calculated from real trade database activity
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {sortedTeams.map((team, index) => {
+            const isContender = team.totalValue >= avgValue;
+
+            return (
+              <div
+                key={team.rosterId}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center space-y-4 shadow-lg hover:border-slate-700 transition"
+              >
+                <div className="relative w-20 h-20 mx-auto">
+                  <img
+                    src={team.avatar}
+                    alt={team.name}
+                    className="w-20 h-20 rounded-full border-2 border-amber-500 object-cover"
+                  />
+                  <span className="absolute -bottom-1 -right-1 bg-slate-900 text-amber-400 border border-amber-500/40 text-xs font-mono font-extrabold px-2 py-0.5 rounded-full">
+                    #{index + 1}
+                  </span>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-bold">{team.name}</h2>
+                  <p className="text-xs text-slate-400 font-mono mt-1">
+                    Record: {team.wins}-{team.losses}
+                  </p>
+                </div>
+
+                {/* Total Roster Value Box */}
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800/80">
+                  <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold block">
+                    Dynasty Trade Value
+                  </span>
+                  <span className="text-2xl font-mono font-extrabold text-amber-400">
+                    {team.totalValue.toLocaleString()} pts
+                  </span>
+                </div>
+
+                {/* Dynamic Status Badges */}
+                <div className="flex flex-wrap justify-center gap-2 pt-2">
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                      isContender
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : "bg-purple-500/10 text-purple-400 border-purple-500/30"
+                    }`}
+                  >
+                    {isContender ? "🔥 Contender" : "🌱 Rebuilder"}
+                  </span>
+                  <span className="px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700 rounded-full text-xs font-semibold">
+                    {team.players.length} Players
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/playoffs/PlayoffMachineClient.tsx">
+"use client";
+
+import { useState } from "react";
+
+interface Team {
+  rosterId: number;
+  name: string;
+  avatar: string;
+  wins: number;
+  losses: number;
+  pointsFor: number;
+}
+
+interface UpcomingMatchup {
+  week: number;
+  matchupId: number;
+  team1RosterId: number;
+  team2RosterId: number;
+}
+
+interface Props {
+  teams: Team[];
+  remainingMatchups: UpcomingMatchup[];
+  playoffTeamsCount: number;
+  playoffStartWeek: number;
+  currentWeek: number;
+  hasMedianMatch: boolean;
+}
+
+export default function PlayoffMachineClient({
+  teams,
+  remainingMatchups,
+  playoffTeamsCount,
+  playoffStartWeek,
+  currentWeek,
+  hasMedianMatch,
+}: Props) {
+  // Store H2H simulated picks: key = "week-matchupId", value = winning rosterId
+  const initialH2HPicks: Record<string, number> = {};
+  remainingMatchups.forEach((m) => {
+    initialH2HPicks[`${m.week}-${m.matchupId}`] = m.team1RosterId;
+  });
+
+  const [h2hPicks, setH2HPicks] = useState<Record<string, number>>(initialH2HPicks);
+
+  // Store Median simulated picks: key = "week-rosterId", value = boolean
+  const [medianPicks, setMedianPicks] = useState<Record<string, boolean>>({});
+
+  const remainingWeeksCount = Math.max(0, playoffStartWeek - currentWeek);
+  const totalGamesPerWeek = hasMedianMatch ? 2 : 1;
+  const totalRemainingGames = remainingWeeksCount * totalGamesPerWeek;
+
+  // Calculate total simulated wins
+  const simWins: Record<number, number> = {};
+  teams.forEach((t) => (simWins[t.rosterId] = t.wins));
+
+  // Add H2H Wins
+  remainingMatchups.forEach((m) => {
+    const winnerId = h2hPicks[`${m.week}-${m.matchupId}`];
+    if (winnerId && simWins[winnerId] !== undefined) {
+      simWins[winnerId] += 1;
+    }
+  });
+
+  // Add Median Wins
+  if (hasMedianMatch) {
+    Object.entries(medianPicks).forEach(([key, wonMedian]) => {
+      if (wonMedian) {
+        const [, rosterIdStr] = key.split("-");
+        const rosterId = Number(rosterIdStr);
+        if (simWins[rosterId] !== undefined) {
+          simWins[rosterId] += 1;
+        }
+      }
+    });
+  }
+
+  // Rank teams based on total simulated wins
+  const simulatedStandings = [...teams]
+    .map((team) => {
+      const currentSimWins = simWins[team.rosterId] || team.wins;
+      const simLosses =
+        team.losses +
+        totalRemainingGames -
+        (currentSimWins - team.wins);
+
+      return {
+        ...team,
+        simWins: currentSimWins,
+        simLosses: Math.max(0, simLosses),
+      };
+    })
+    .sort((a, b) => b.simWins - a.simWins || b.pointsFor - a.pointsFor);
+
+  const toggleH2HWinner = (week: number, matchupId: number, rosterId: number) => {
+    setH2HPicks((prev) => ({ ...prev, [`${week}-${matchupId}`]: rosterId }));
+  };
+
+  const toggleMedianWin = (week: number, rosterId: number) => {
+    const key = `${week}-${rosterId}`;
+    setMedianPicks((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const getTeam = (rosterId: number) => teams.find((t) => t.rosterId === rosterId);
+
+  const weeksList = Array.from(
+    new Set(remainingMatchups.map((m) => m.week))
+  ).sort((a, b) => a - b);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Standings */}
+      <div className="lg:col-span-2 space-y-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+          <div className="p-5 border-b border-slate-800 flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-slate-100">Simulated Playoff Standings</h2>
+              {hasMedianMatch && (
+                <p className="text-xs text-amber-400 mt-0.5">
+                  ⚡ League Median Enabled: 2 games per team each week
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/50">
+                  <th className="py-3 px-4">Seed</th>
+                  <th className="py-3 px-4">Manager</th>
+                  <th className="py-3 px-4 text-center">Current Record</th>
+                  <th className="py-3 px-4 text-center">Simulated Record</th>
+                  <th className="py-3 px-4 text-right">Points For</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {simulatedStandings.map((team, idx) => {
+                  const seed = idx + 1;
+                  const isBye = seed <= 2;
+                  const isPlayoff = seed <= playoffTeamsCount;
+
+                  return (
+                    <tr
+                      key={team.rosterId}
+                      className={`hover:bg-slate-800/40 transition ${
+                        isBye
+                          ? "bg-amber-500/5"
+                          : isPlayoff
+                          ? "bg-slate-900"
+                          : "bg-slate-950/40"
+                      }`}
+                    >
+                      <td className="py-3 px-4 font-mono font-bold">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs ${
+                            isBye
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                              : isPlayoff
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          #{seed} {isBye ? "(Bye)" : ""}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 flex items-center space-x-3">
+                        <img
+                          src={team.avatar}
+                          alt=""
+                          className="w-7 h-7 rounded-full border border-slate-700 object-cover"
+                        />
+                        <span className="font-bold text-slate-100">{team.name}</span>
+                      </td>
+
+                      <td className="py-3 px-4 text-center font-mono text-slate-400">
+                        {team.wins}-{team.losses}
+                      </td>
+
+                      <td className="py-3 px-4 text-center font-mono font-extrabold text-amber-400">
+                        {team.simWins}-{team.simLosses}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-mono text-slate-300">
+                        {team.pointsFor.toFixed(1)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Schedule Selector */}
+      <div className="space-y-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 className="text-lg font-bold text-amber-500 border-b border-slate-800 pb-3">
+            Simulate Matchups
+          </h2>
+
+          <div className="space-y-6 max-h-[700px] overflow-y-auto pr-2">
+            {weeksList.map((week) => (
+              <div key={week} className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 bg-slate-950 px-3 py-1 rounded">
+                  Week {week}
+                </h3>
+                {remainingMatchups
+                  .filter((m) => m.week === week)
+                  .map((m) => {
+                    const t1 = getTeam(m.team1RosterId);
+                    const t2 = getTeam(m.team2RosterId);
+                    const currentH2H = h2hPicks[`${m.week}-${m.matchupId}`];
+
+                    if (!t1 || !t2) return null;
+
+                    const t1Median = !!medianPicks[`${week}-${t1.rosterId}`];
+                    const t2Median = !!medianPicks[`${week}-${t2.rosterId}`];
+
+                    return (
+                      <div
+                        key={`${m.week}-${m.matchupId}`}
+                        className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2"
+                      >
+                        {/* Team 1 */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleH2HWinner(m.week, m.matchupId, t1.rosterId)}
+                            className={`flex-1 flex justify-between items-center px-3 py-1.5 rounded text-xs font-semibold transition ${
+                              currentH2H === t1.rosterId
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/50"
+                                : "bg-slate-900 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            <span className="truncate">{t1.name}</span>
+                            {currentH2H === t1.rosterId && <span>✓ H2H</span>}
+                          </button>
+                          {hasMedianMatch && (
+                            <button
+                              type="button"
+                              onClick={() => toggleMedianWin(week, t1.rosterId)}
+                              className={`px-2 py-1.5 rounded text-[10px] font-bold border transition ${
+                                t1Median
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50"
+                                  : "bg-slate-900 text-slate-500 border-slate-800"
+                              }`}
+                            >
+                              +1 Med
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Team 2 */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleH2HWinner(m.week, m.matchupId, t2.rosterId)}
+                            className={`flex-1 flex justify-between items-center px-3 py-1.5 rounded text-xs font-semibold transition ${
+                              currentH2H === t2.rosterId
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/50"
+                                : "bg-slate-900 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            <span className="truncate">{t2.name}</span>
+                            {currentH2H === t2.rosterId && <span>✓ H2H</span>}
+                          </button>
+                          {hasMedianMatch && (
+                            <button
+                              type="button"
+                              onClick={() => toggleMedianWin(week, t2.rosterId)}
+                              className={`px-2 py-1.5 rounded text-[10px] font-bold border transition ${
+                                t2Median
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50"
+                                  : "bg-slate-900 text-slate-500 border-slate-800"
+                              }`}
+                            >
+                              +1 Med
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/press-conference/page.tsx">
+// app/press-conference/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+import { supabase, PressPost } from "@/lib/supabase";
+import PressConferenceClient from "./PressConferenceClient";
+
+// Disable Next.js static caching for this route
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export default async function PressConferencePage() {
+  const { teams } = await getLeagueData();
+
+  // Fetch past posts from Supabase
+  const { data: posts, error } = await supabase
+    .from("press_conferences")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Supabase fetch error:", error);
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Manager Press Conferences
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Official post-game quotes, trade block announcements, and unfiltered league banter
+          </p>
+        </div>
+
+        <PressConferenceClient
+          teams={teams}
+          initialPosts={(posts as PressPost[]) || []}
+        />
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/press-conference/PressConferenceClient.tsx">
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase, PressPost } from "@/lib/supabase";
+
+interface Team {
+  rosterId: number;
+  name: string;
+  avatar: string;
+}
+
+interface Props {
+  teams: Team[];
+  initialPosts: PressPost[];
+}
+
+export default function PressConferenceClient({ teams, initialPosts }: Props) {
+  const router = useRouter();
+  const [posts, setPosts] = useState<PressPost[]>(initialPosts);
+  const [selectedRosterId, setSelectedRosterId] = useState<number>(teams[0]?.rosterId || 1);
+  const [category, setCategory] = useState<"Post-Game" | "Trash Talk" | "Trade Block">("Post-Game");
+  const [headline, setHeadline] = useState("");
+  const [content, setContent] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const selectedTeam = teams.find((t) => t.rosterId === selectedRosterId) || teams[0];
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!headline.trim() || !content.trim()) return;
+
+    setIsSubmitting(true);
+
+    const newPost = {
+      roster_id: selectedRosterId,
+      manager_name: selectedTeam.name,
+      category,
+      headline,
+      content,
+    };
+
+    const { data, error } = await supabase
+      .from("press_conferences")
+      .insert([newPost])
+      .select();
+
+    if (error) {
+      console.error("Error submitting post to Supabase:", error);
+      alert(`Submission failed: ${error.message}`);
+    } else if (data) {
+      setPosts([data[0] as PressPost, ...posts]);
+      setHeadline("");
+      setContent("");
+      router.refresh(); // Refresh Next.js server state
+    }
+
+    setIsSubmitting(false);
+  };
+
+  const getCategoryBadge = (cat: string) => {
+    if (cat === "Trade Block") {
+      return "bg-purple-500/20 text-purple-300 border-purple-500/40";
+    }
+    if (cat === "Trash Talk") {
+      return "bg-red-500/20 text-red-300 border-red-500/40";
+    }
+    return "bg-amber-500/20 text-amber-300 border-amber-500/40";
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Form */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 h-fit">
+        <h2 className="text-xl font-bold text-slate-100 border-b border-slate-800 pb-3">
+          Take the Podium
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+              Select Manager
+            </label>
+            <select
+              value={selectedRosterId}
+              onChange={(e) => setSelectedRosterId(Number(e.target.value))}
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+            >
+              {teams.map((t) => (
+                <option key={t.rosterId} value={t.rosterId}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+              Category
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as any)}
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+            >
+              <option value="Post-Game">Post-Game Quote</option>
+              <option value="Trash Talk">Trash Talk</option>
+              <option value="Trade Block">Trade Block Alert</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+              Headline
+            </label>
+            <input
+              type="text"
+              placeholder="e.g., 'We executed our gameplan perfectly'"
+              value={headline}
+              onChange={(e) => setHeadline(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+              Statement
+            </label>
+            <textarea
+              rows={4}
+              placeholder="Type statement here..."
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded transition disabled:opacity-50"
+          >
+            {isSubmitting ? "Publishing..." : "Publish Statement"}
+          </button>
+        </form>
+      </div>
+
+      {/* Feed */}
+      <div className="lg:col-span-2 space-y-4">
+        <h2 className="text-xl font-bold text-slate-100">Recent Press Releases</h2>
+
+        {posts.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+            No press releases published yet. Be the first manager to speak to the media!
+          </div>
+        ) : (
+          posts.map((post) => {
+            const authorTeam = teams.find((t) => t.rosterId === post.roster_id);
+
+            return (
+              <div
+                key={post.id}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-3 shadow-md"
+              >
+                <div className="flex justify-between items-start gap-4">
+                  <div className="flex items-center space-x-3">
+                    {authorTeam && (
+                      <img
+                        src={authorTeam.avatar}
+                        alt=""
+                        className="w-10 h-10 rounded-full border border-amber-500 object-cover"
+                      />
+                    )}
+                    <div>
+                      <h3 className="font-bold text-slate-100">{post.manager_name}</h3>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        {new Date(post.created_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-bold border ${getCategoryBadge(
+                      post.category
+                    )}`}
+                  >
+                    {post.category}
+                  </span>
+                </div>
+
+                <div className="pt-2">
+                  <h4 className="text-lg font-extrabold text-amber-400">"{post.headline}"</h4>
+                  <p className="text-slate-300 text-sm mt-2 leading-relaxed whitespace-pre-wrap">
+                    {post.content}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/trades/page.tsx">
+// app/trades/page.tsx
+import { getLeagueData, getPlayerMap, getTransactions } from "@/lib/sleeper";
+import Link from "next/link";
+
+export const dynamic = "force-dynamic";
+
+export default async function TradesPage() {
+  const [{ teams }, playerMap, { trades }] = await Promise.all([
+    getLeagueData(),
+    getPlayerMap(),
+    getTransactions(),
+  ]);
+
+  const getTeam = (rosterId: number) => teams.find((t) => t.rosterId === rosterId);
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">Trade History & Log</h1>
+          <p className="text-slate-400 text-sm mt-1">Complete record of trades executed during the season</p>
+        </div>
+
+        {trades.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-xl text-center text-slate-400 text-sm">
+            No trades completed yet this season.
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {trades.map((trade) => {
+              const involvedTeams = trade.rosterIds.map((rid) => getTeam(rid)).filter(Boolean);
+              const dateStr = new Date(trade.timestamp).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              });
+
+              return (
+                <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                      Completed Trade
+                    </span>
+                    <span className="text-xs font-mono text-slate-500">{dateStr}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {involvedTeams.map((team) => {
+                      if (!team) return null;
+
+                      // Players received by this team
+                      const receivedPlayers = Object.entries(trade.adds)
+                        .filter(([_, receivingRosterId]) => receivingRosterId === team.rosterId)
+                        .map(([pid]) => playerMap[pid])
+                        .filter(Boolean);
+
+                      // Draft picks received by this team
+                      const receivedPicks = trade.draftPicks.filter(
+                        (p) => p.owner_id === team.rosterId
+                      );
+
+                      // FAAB received by this team
+                      const receivedFaab = trade.waiverBudget.filter(
+                        (b) => b.receiver === team.rosterId
+                      );
+
+                      return (
+                        <div key={team.rosterId} className="bg-slate-950/70 rounded-lg p-4 border border-slate-800 space-y-2">
+                          <Link href={`/teams/${team.rosterId}`} className="flex items-center space-x-2">
+                            <img src={team.avatar} alt="" className="w-7 h-7 rounded-full object-cover" />
+                            <span className="font-bold text-sm text-slate-100 hover:text-amber-400">
+                              {team.name}
+                            </span>
+                          </Link>
+
+                          <div className="text-xs space-y-1 pt-2">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 block">Acquired:</span>
+                            {receivedPlayers.map((p) => (
+                              <div key={p.id} className="text-emerald-400 font-medium">
+                                + {p.name} ({p.position} - {p.team})
+                              </div>
+                            ))}
+                            {receivedPicks.map((pick, i) => (
+                              <div key={i} className="text-blue-400 font-medium">
+                                + {pick.season} Round {pick.round} Pick
+                              </div>
+                            ))}
+                            {receivedFaab.map((f, i) => (
+                              <div key={i} className="text-amber-400 font-medium">
+                                + ${f.amount} FAAB
+                              </div>
+                            ))}
+                            {receivedPlayers.length === 0 && receivedPicks.length === 0 && receivedFaab.length === 0 && (
+                              <div className="text-slate-600 italic">No assets listed</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/trophies/page.tsx">
+// app/trophies/page.tsx
+import { getLeagueHistory } from "@/lib/sleeper";
+
+export const dynamic = "force-dynamic";
+
+export default async function TrophiesPage() {
+  const history = await getLeagueHistory();
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Hall of Fame & Trophy Case
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Historical champions and playoff outcomes across all past Sleeper seasons
+          </p>
+        </div>
+
+        {history.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+            No historical season data found.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {history.map((season) => (
+              <div
+                key={season.leagueId}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 shadow-lg"
+              >
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <h2 className="text-xl font-extrabold text-amber-400">
+                    {season.season} Season
+                  </h2>
+                  <span className="text-xs font-mono text-slate-500">
+                    ID: {season.leagueId.slice(0, 8)}...
+                  </span>
+                </div>
+
+                {/* Champion Card */}
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex items-center space-x-4">
+                  {season.champion ? (
+                    <>
+                      <img
+                        src={season.champion.avatar}
+                        alt=""
+                        className="w-12 h-12 rounded-full border-2 border-amber-400 object-cover"
+                      />
+                      <div>
+                        <span className="text-xs uppercase tracking-wider font-extrabold text-amber-400 block">
+                          🏆 League Champion
+                        </span>
+                        <h3 className="text-lg font-bold text-slate-100">
+                          {season.champion.name}
+                        </h3>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400">Playoff bracket data pending or unfinalized</p>
+                  )}
+                </div>
+
+                {/* Runner Up Card */}
+                {season.runnerUp && (
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center space-x-3">
+                    <img
+                      src={season.runnerUp.avatar}
+                      alt=""
+                      className="w-8 h-8 rounded-full border border-slate-700 object-cover"
+                    />
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                        🥈 Runner-Up
+                      </span>
+                      <h4 className="text-sm font-semibold text-slate-200">
+                        {season.runnerUp.name}
+                      </h4>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/page.tsx">
+// app/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+
+export default async function HomePage() {
+  const { league, teams } = await getLeagueData();
+
+  // Sort teams by wins, then points for
+  const standings = [...teams].sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    return b.pointsFor - a.pointsFor;
+  });
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Header */}
+        <header className="border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-extrabold tracking-tight text-amber-500">
+              {league.name}
+            </h1>
+            <p className="text-slate-400 mt-1">
+              Season {league.season} • Dynasty League
+            </p>
+          </div>
+          <a
+            href="/draft-capital"
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg transition"
+          >
+            Draft Capital Matrix →
+          </a>
+        </header>
+
+        {/* Standings Table */}
+        <section className="bg-slate-900 rounded-xl border border-slate-800 p-6 shadow-xl">
+          <h2 className="text-2xl font-bold mb-4 text-slate-200">League Standings</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 text-sm">
+                  <th className="py-3 px-4">Rank</th>
+                  <th className="py-3 px-4">Team</th>
+                  <th className="py-3 px-4 text-center">Record</th>
+                  <th className="py-3 px-4 text-right">Points For</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {standings.map((team, index) => (
+                  <tr key={team.rosterId} className="hover:bg-slate-800/40 transition">
+                    <td className="py-4 px-4 font-mono text-slate-500">#{index + 1}</td>
+                    <td className="py-4 px-4 flex items-center space-x-3">
+                      <img
+                        src={team.avatar}
+                        alt={team.name}
+                        className="w-8 h-8 rounded-full border border-slate-700"
+                      />
+                      <span className="font-semibold text-slate-100">{team.name}</span>
+                    </td>
+                    <td className="py-4 px-4 text-center font-mono">
+                      {team.wins}-{team.losses}
+                    </td>
+                    <td className="py-4 px-4 text-right font-mono font-bold text-amber-400">
+                      {team.pointsFor.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="lib/fantasycalc.ts">
+// lib/fantasycalc.ts
+export async function getDynastyValues(): Promise<Record<string, number>> {
+  try {
+    // Query parameters: numQbs=2 (SuperFlex), numTeams=12, ppr=1 (Full PPR)
+    const res = await fetch(
+      "https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1",
+      { next: { revalidate: 86400 } }
+    );
+
+    if (!res.ok) return {};
+
+    const data = await res.json();
+    const valueMap: Record<string, number> = {};
+
+    data.forEach((item: any) => {
+      if (item.player?.sleeperId) {
+        valueMap[item.player.sleeperId] = item.value || 0;
+      }
+    });
+
+    return valueMap;
+  } catch (error) {
+    console.error("Error fetching dynasty values:", error);
+    return {};
+  }
+}
+</file>
+
+<file path=".gitignore">
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import Navbar from "@/components/Navbar";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Dynasty League Hub",
+  description: "Custom dynasty fantasy football league dashboard",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <Navbar />
+        {children}
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="lib/history.ts">
+// lib/history.ts
+const BASE_URL = "https://api.sleeper.app/v1";
+
+export interface SeasonHistory {
+  leagueId: string;
+  season: string;
+  name: string;
+  users: any[];
+  rosters: any[];
+}
+
+export async function getHistoricalData(): Promise<SeasonHistory[]> {
+  const currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!currentLeagueId) return [];
+
+  const seasons: SeasonHistory[] = [];
+  let leagueId: string | null = currentLeagueId;
+  let depth = 0;
+
+  // Walk backward through past seasons up to 10 years
+  while (leagueId && depth < 10) {
+    try {
+      const leagueRes: Response = await fetch(`${BASE_URL}/league/${leagueId}`, { next: { revalidate: 86400 } });
+      const usersRes: Response = await fetch(`${BASE_URL}/league/${leagueId}/users`, { next: { revalidate: 86400 } });
+      const rostersRes: Response = await fetch(`${BASE_URL}/league/${leagueId}/rosters`, { next: { revalidate: 86400 } });
+
+      const league: any = await leagueRes.json();
+      if (!league || league === "null" || !league.season) break;
+
+      const users: any = await usersRes.json();
+      const rosters: any = await rostersRes.json();
+
+      seasons.push({
+        leagueId,
+        season: league.season,
+        name: league.name,
+        users: Array.isArray(users) ? users : [],
+        rosters: Array.isArray(rosters) ? rosters : [],
+      });
+
+      leagueId = league.previous_league_id || null;
+      depth++;
+    } catch (error) {
+      console.error("Error fetching historical season:", error);
+      break;
+    }
+  }
+
+  return seasons;
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "fantasy-dynasty-hub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.45.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="app/draft-capital/page.tsx">
+// app/draft-capital/page.tsx
+import { getDraftPicks, getLeagueData } from "@/lib/sleeper";
+
+export const dynamic = "force-dynamic";
+
+export default async function DraftCapitalPage() {
+  const { teams, league } = await getLeagueData();
+  const rawTradedPicks = await getDraftPicks();
+  const tradedPicks = Array.isArray(rawTradedPicks) ? rawTradedPicks : [];
+
+  const currentSeason = parseInt(league.season || "2026", 10);
+  
+  // If the league is active, completed, or post-season, the current year's draft has passed
+  const isDraftCompleted =
+    league.status !== "pre_draft" && league.status !== "drafting";
+  const startYear = isDraftCompleted ? currentSeason + 1 : currentSeason;
+  const draftYears = [startYear, startYear + 1, startYear + 2];
+
+  const rounds = [1, 2, 3, 4];
+
+  const getTeam = (rosterId: number) =>
+    teams.find((t) => t.rosterId === rosterId);
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Draft Capital Tracker
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Upcoming draft pick stashes, acquired assets, and traded draft capital across the league
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {teams.map((team) => {
+            // Outgoing: original picks owned by this team that were traded to someone else
+            const tradedAway = tradedPicks.filter(
+              (p: any) =>
+                p.roster_id === team.rosterId &&
+                draftYears.includes(parseInt(p.season, 10))
+            );
+
+            // Incoming: picks acquired from other teams
+            const acquired = tradedPicks.filter(
+              (p: any) =>
+                p.owner_id === team.rosterId &&
+                p.roster_id !== team.rosterId &&
+                draftYears.includes(parseInt(p.season, 10))
+            );
+
+            return (
+              <div
+                key={team.rosterId}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-5"
+              >
+                <div className="space-y-4">
+                  {/* Team Header */}
+                  <div className="flex items-center space-x-3 border-b border-slate-800 pb-3">
+                    <img
+                      src={team.avatar}
+                      alt=""
+                      className="w-10 h-10 rounded-full border border-amber-500/50 object-cover"
+                    />
+                    <div>
+                      <h2 className="font-bold text-slate-100">{team.name}</h2>
+                      <p className="text-xs text-slate-400">Roster #{team.rosterId}</p>
+                    </div>
+                  </div>
+
+                  {/* Section 1: All Currently Held Picks */}
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                      Current Pick Stash
+                    </h3>
+                    <div className="space-y-3">
+                      {draftYears.map((year) => {
+                        // Own picks retained
+                        const ownPicksHeld = rounds
+                          .filter(
+                            (r) =>
+                              !tradedAway.some(
+                                (p: any) =>
+                                  parseInt(p.season, 10) === year &&
+                                  p.round === r
+                              )
+                          )
+                          .map((r) => ({
+                            year,
+                            round: r,
+                            isOwn: true,
+                            originalOwner: team,
+                          }));
+
+                        // Acquired picks for this year
+                        const acquiredForYear = acquired
+                          .filter((p: any) => parseInt(p.season, 10) === year)
+                          .map((p: any) => ({
+                            year,
+                            round: p.round,
+                            isOwn: false,
+                            originalOwner: getTeam(p.roster_id),
+                          }));
+
+                        const allHeldPicks = [...ownPicksHeld, ...acquiredForYear].sort(
+                          (a, b) => a.round - b.round
+                        );
+
+                        return (
+                          <div
+                            key={year}
+                            className="bg-slate-950/70 p-3 rounded-lg border border-slate-800/80"
+                          >
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-xs font-bold text-amber-400">
+                                {year} Draft
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {allHeldPicks.length} {allHeldPicks.length === 1 ? "Pick" : "Picks"}
+                              </span>
+                            </div>
+
+                            {allHeldPicks.length === 0 ? (
+                              <p className="text-xs text-slate-500 italic">No picks in this draft</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5">
+                                {allHeldPicks.map((pick, i) => (
+                                  <span
+                                    key={i}
+                                    className={`text-xs px-2.5 py-1 rounded-md font-semibold border ${
+                                      pick.isOwn
+                                        ? "bg-slate-800 border-slate-700 text-slate-200"
+                                        : "bg-emerald-950/60 border-emerald-700/60 text-emerald-300"
+                                    }`}
+                                  >
+                                    R{pick.round}
+                                    {!pick.isOwn && (
+                                      <span className="text-[10px] opacity-80 ml-1">
+                                        (via {pick.originalOwner?.name.split(" ")[0] || `Team ${pick.originalOwner?.rosterId}`})
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Section 2: Trade Movement Summary */}
+                  <div className="pt-3 border-t border-slate-800 space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Pick Movement
+                    </h3>
+
+                    {/* Acquired Picks */}
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">
+                        + Acquired ({acquired.length})
+                      </span>
+                      {acquired.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 italic">No incoming picks</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {acquired.map((p: any, idx: number) => {
+                            const origTeam = getTeam(p.roster_id);
+                            return (
+                              <div
+                                key={idx}
+                                className="text-xs bg-emerald-950/30 border border-emerald-900/40 text-emerald-300 px-2.5 py-1.5 rounded flex justify-between items-center"
+                              >
+                                <span className="font-semibold">
+                                  {p.season} Round {p.round}
+                                </span>
+                                <span className="text-[10px] text-emerald-400/80">
+                                  from {origTeam?.name || `Team ${p.roster_id}`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Traded Away Picks */}
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider block">
+                        - Traded Away ({tradedAway.length})
+                      </span>
+                      {tradedAway.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 italic">No outgoing picks</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {tradedAway.map((p: any, idx: number) => {
+                            const newOwner = getTeam(p.owner_id);
+                            return (
+                              <div
+                                key={idx}
+                                className="text-xs bg-rose-950/30 border border-rose-900/40 text-rose-300 px-2.5 py-1.5 rounded flex justify-between items-center"
+                              >
+                                <span className="font-semibold">
+                                  {p.season} Round {p.round}
+                                </span>
+                                <span className="text-[10px] text-rose-400/80">
+                                  to {newOwner?.name || `Team ${p.owner_id}`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/playoffs/page.tsx">
+// app/playoffs/page.tsx
+import { getLeagueData } from "@/lib/sleeper";
+import PlayoffMachineClient from "./PlayoffMachineClient";
+
+export default async function PlayoffMachinePage() {
+  const { league, teams } = await getLeagueData();
+
+  const playoffTeamsCount = league.settings?.playoff_teams || 6;
+  const playoffStartWeek = league.settings?.playoff_week_start || 15;
+  const currentWeek = league.settings?.leg || 1;
+  const hasMedianMatch = league.settings?.league_average_match === 1;
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+
+  const remainingMatchups: any[] = [];
+
+  for (let w = currentWeek; w < playoffStartWeek; w++) {
+    try {
+      const res = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${w}`, {
+        next: { revalidate: 3600 },
+      });
+      const matchups = await res.json();
+
+      if (Array.isArray(matchups)) {
+        const grouped: Record<number, number[]> = {};
+        matchups.forEach((m: any) => {
+          if (!grouped[m.matchup_id]) grouped[m.matchup_id] = [];
+          grouped[m.matchup_id].push(m.roster_id);
+        });
+
+        Object.entries(grouped).forEach(([mId, rosterIds]) => {
+          if (rosterIds.length === 2) {
+            remainingMatchups.push({
+              week: w,
+              matchupId: Number(mId),
+              team1RosterId: rosterIds[0],
+              team2RosterId: rosterIds[1],
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.error(`Error fetching matchups for week ${w}:`, e);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            Interactive Playoff Machine
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Toggle game winners and median points bonuses to simulate playoff seeding outcomes
+          </p>
+        </div>
+
+        <PlayoffMachineClient
+          teams={teams}
+          remainingMatchups={remainingMatchups}
+          playoffTeamsCount={playoffTeamsCount}
+          playoffStartWeek={playoffStartWeek}
+          currentWeek={currentWeek}
+          hasMedianMatch={hasMedianMatch}
+        />
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/records/page.tsx">
+// app/records/page.tsx
+import { getAllTimeRecords } from "@/lib/sleeper";
+
+export const dynamic = "force-dynamic";
+
+export default async function RecordsPage() {
+  const {
+    leaderboard,
+    highestSingleGameScore,
+    lowestSingleGameScore,
+    biggestBlowout,
+    closestMatchup,
+    highestSeasonPoints,
+    highestSeasonWins,
+  } = await getAllTimeRecords();
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-6xl mx-auto space-y-10">
+        <div className="border-b border-slate-800 pb-6">
+          <h1 className="text-3xl font-extrabold text-amber-500">
+            All-Time League Records
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Historical single-game benchmarks, season records, and complete all-time standings
+          </p>
+        </div>
+
+        {/* Game & Season Highlights */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Highest Single Game Score */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <span className="text-xs font-bold uppercase text-amber-400 tracking-wide block">
+              Highest Single-Week Score
+            </span>
+            <div className="flex items-center space-x-3">
+              <img src={highestSingleGameScore.avatar} alt="" className="w-12 h-12 rounded-full border-2 border-amber-500/60 object-cover" />
+              <div>
+                <h3 className="font-bold text-slate-100">{highestSingleGameScore.name}</h3>
+                <p className="text-xl font-extrabold text-amber-400">{highestSingleGameScore.points.toFixed(2)} pts</p>
+                <p className="text-[11px] text-slate-500 font-mono">
+                  {highestSingleGameScore.season} • Week {highestSingleGameScore.week}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Biggest Blowout */}
+          {biggestBlowout && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+              <span className="text-xs font-bold uppercase text-red-400 tracking-wide block">
+                Largest Blowout
+              </span>
+              <div>
+                <div className="flex justify-between items-center text-sm font-bold text-slate-100">
+                  <span>{biggestBlowout.winnerName}</span>
+                  <span className="text-amber-400">{biggestBlowout.winnerPoints.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400 mt-1">
+                  <span>def. {biggestBlowout.loserName}</span>
+                  <span>{biggestBlowout.loserPoints.toFixed(2)}</span>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-800 flex justify-between items-center">
+                  <span className="text-xs font-bold text-red-400">+{biggestBlowout.margin} pt margin</span>
+                  <span className="text-[11px] text-slate-500 font-mono">{biggestBlowout.season} • Wk {biggestBlowout.week}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Closest Matchup */}
+          {closestMatchup && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+              <span className="text-xs font-bold uppercase text-purple-400 tracking-wide block">
+                Narrowest Victory
+              </span>
+              <div>
+                <div className="flex justify-between items-center text-sm font-bold text-slate-100">
+                  <span>{closestMatchup.winnerName}</span>
+                  <span className="text-amber-400">{closestMatchup.winnerPoints.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400 mt-1">
+                  <span>def. {closestMatchup.loserName}</span>
+                  <span>{closestMatchup.loserPoints.toFixed(2)}</span>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-800 flex justify-between items-center">
+                  <span className="text-xs font-bold text-purple-400">+{closestMatchup.margin} pt margin</span>
+                  <span className="text-[11px] text-slate-500 font-mono">{closestMatchup.season} • Wk {closestMatchup.week}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Most Points Single Season */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <span className="text-xs font-bold uppercase text-emerald-400 tracking-wide block">
+              Most Points in a Season
+            </span>
+            <div className="flex items-center space-x-3">
+              <img src={highestSeasonPoints.avatar} alt="" className="w-12 h-12 rounded-full border-2 border-emerald-500/60 object-cover" />
+              <div>
+                <h3 className="font-bold text-slate-100">{highestSeasonPoints.name}</h3>
+                <p className="text-xl font-extrabold text-emerald-400">{highestSeasonPoints.points.toFixed(2)} pts</p>
+                <p className="text-[11px] text-slate-500 font-mono">{highestSeasonPoints.season} Season</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Most Wins Single Season */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <span className="text-xs font-bold uppercase text-blue-400 tracking-wide block">
+              Most Wins in a Season
+            </span>
+            <div className="flex items-center space-x-3">
+              <img src={highestSeasonWins.avatar} alt="" className="w-12 h-12 rounded-full border-2 border-blue-500/60 object-cover" />
+              <div>
+                <h3 className="font-bold text-slate-100">{highestSeasonWins.name}</h3>
+                <p className="text-xl font-extrabold text-blue-400">{highestSeasonWins.wins} Wins</p>
+                <p className="text-[11px] text-slate-500 font-mono">{highestSeasonWins.season} Season</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Lowest Single Game Score */}
+          {lowestSingleGameScore && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+              <span className="text-xs font-bold uppercase text-slate-400 tracking-wide block">
+                Lowest Single-Week Score
+              </span>
+              <div className="flex items-center space-x-3">
+                <img src={lowestSingleGameScore.avatar} alt="" className="w-12 h-12 rounded-full border-2 border-slate-700 object-cover" />
+                <div>
+                  <h3 className="font-bold text-slate-100">{lowestSingleGameScore.name}</h3>
+                  <p className="text-xl font-extrabold text-slate-400">{lowestSingleGameScore.points.toFixed(2)} pts</p>
+                  <p className="text-[11px] text-slate-500 font-mono">{lowestSingleGameScore.season} • Week {lowestSingleGameScore.week}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* All-Time Leaderboard */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+          <h2 className="text-xl font-extrabold text-slate-100">All-Time Standings</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-300">
+              <thead className="bg-slate-950 text-slate-400 text-xs uppercase border-b border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">Manager</th>
+                  <th className="py-3 px-4 text-center">Seasons</th>
+                  <th className="py-3 px-4 text-center">All-Time W - L - T</th>
+                  <th className="py-3 px-4 text-center">Win %</th>
+                  <th className="py-3 px-4 text-right">All-Time Points</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {leaderboard.map((m, idx) => (
+                  <tr key={m.ownerId} className="hover:bg-slate-800/40">
+                    <td className="py-3 px-4 flex items-center space-x-3">
+                      <span className="text-xs font-mono text-slate-500 w-5">#{idx + 1}</span>
+                      <img src={m.avatar} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-700" />
+                      <span className="font-semibold text-slate-100">{m.name}</span>
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono text-slate-400">{m.seasons}</td>
+                    <td className="py-3 px-4 text-center font-mono font-bold">
+                      {m.wins} - {m.losses} - {m.ties}
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono text-amber-400 font-bold">
+                      {m.winPct.toFixed(1)}%
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-200">
+                      {m.pointsFor.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="components/Navbar.tsx">
+// components/Navbar.tsx
+import Link from "next/link";
+
+export default function Navbar() {
+  return (
+    <nav className="bg-slate-900 border-b border-slate-800 px-6 py-4">
+      <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
+        <Link href="/" className="text-xl font-extrabold text-amber-500">
+          Dynasty Hub
+        </Link>
+        <div className="flex flex-wrap items-center space-x-6 text-sm font-medium text-slate-300">
+          <Link href="/" className="hover:text-amber-400 transition">Standings</Link>
+          <Link href="/matchups" className="hover:text-amber-400 transition">Matchups</Link>
+          <Link href="/playoffs" className="hover:text-amber-400 transition">Playoffs</Link>
+          <Link href="/press-conference" className="hover:text-amber-400 transition">Press Room</Link>
+          <Link href="/draft-capital" className="hover:text-amber-400 transition">Draft Capital</Link>
+          <Link href="/trades" className="hover:text-amber-400 transition">Trade Feed</Link>
+          <Link href="/managers" className="hover:text-amber-400 transition">Managers</Link>
+          <Link href="/records" className="hover:text-amber-400 transition">Record Book</Link>
+          <Link href="/trophies" className="hover:text-amber-400 transition">Trophy Case</Link>
+          <Link href="/analytics/age-production" className="hover:text-amber-400 transition">Age Matrix</Link>
+          <Link href="/constitution" className="hover:text-amber-400 transition">Constitution</Link>
+        </div>
+      </div>
+    </nav>
+  );
+}
+</file>
+
+<file path="lib/sleeper.ts">
+// lib/sleeper.ts
+
+export interface Team {
+  rosterId: number;
+  ownerId: string;
+  name: string;
+  avatar: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor: number;
+  players: string[];
+}
+
+export interface HistoricalSeason {
+  season: string;
+  leagueId: string;
+  champion: {
+    name: string;
+    avatar: string;
+  } | null;
+  runnerUp: {
+    name: string;
+    avatar: string;
+  } | null;
+}
+
+export interface GameRecord {
+  winnerName: string;
+  winnerAvatar: string;
+  loserName: string;
+  loserAvatar: string;
+  winnerPoints: number;
+  loserPoints: number;
+  margin: number;
+  season: string;
+  week: number;
+}
+
+export interface AllTimeManagerStats {
+  ownerId: string;
+  name: string;
+  avatar: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor: number;
+  winPct: number;
+  seasons: number;
+}
+
+export interface AllTimeRecordsResult {
+  leaderboard: AllTimeManagerStats[];
+  highestSingleGameScore: { name: string; avatar: string; points: number; season: string; week: number };
+  lowestSingleGameScore: { name: string; avatar: string; points: number; season: string; week: number } | null;
+  biggestBlowout: GameRecord | null;
+  closestMatchup: GameRecord | null;
+  highestSeasonPoints: { name: string; avatar: string; points: number; season: string };
+  highestSeasonWins: { name: string; avatar: string; wins: number; season: string };
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  position: string;
+  team: string;
+  age: number;
+}
+
+export interface TradeTransaction {
+  id: string;
+  timestamp: number;
+  rosterIds: number[];
+  adds: Record<string, number>;
+  drops: Record<string, number>;
+  draftPicks: {
+    season: string;
+    round: number;
+    roster_id: number;
+    owner_id: number;
+    previous_owner_id: number;
+  }[];
+  waiverBudget: {
+    sender: number;
+    receiver: number;
+    amount: number;
+  }[];
+}
+
+export interface WaiverTransaction {
+  id: string;
+  timestamp: number;
+  rosterId: number;
+  addedPlayerId: string | null;
+  droppedPlayerId: string | null;
+  bid: number;
+  status: string;
+}
+
+export async function getLeagueData() {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) throw new Error("NEXT_PUBLIC_SLEEPER_LEAGUE_ID is not set");
+
+  const [leagueRes, usersRes, rostersRes] = await Promise.all([
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}`, { next: { revalidate: 3600 } }),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`, { next: { revalidate: 3600 } }),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`, { next: { revalidate: 3600 } }),
+  ]);
+
+  const league = await leagueRes.json();
+  const users = await usersRes.json();
+  const rosters = await rostersRes.json();
+
+  const userMap: Record<string, { name: string; avatar: string }> = {};
+  users.forEach((u: any) => {
+    const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
+    const avatar = u.avatar
+      ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+      : "https://sleepercdn.com/images/v2/owners/guy_select.png";
+    userMap[u.user_id] = { name: teamName, avatar };
+  });
+
+  const teams: Team[] = rosters.map((r: any) => {
+    const owner = userMap[r.owner_id] || {
+      name: `Team ${r.roster_id}`,
+      avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png",
+    };
+
+    return {
+      rosterId: r.roster_id,
+      ownerId: r.owner_id,
+      name: owner.name,
+      avatar: owner.avatar,
+      wins: r.settings?.wins || 0,
+      losses: r.settings?.losses || 0,
+      ties: r.settings?.ties || 0,
+      pointsFor: Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`),
+      players: r.players || [],
+    };
+  });
+
+  return { league, teams };
+}
+
+export async function getDraftPicks() {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) return [];
+
+  try {
+    const res = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/traded_picks`, {
+      next: { revalidate: 3600 },
+    });
+    return await res.json();
+  } catch (err) {
+    console.error("Error fetching draft picks:", err);
+    return [];
+  }
+}
+
+export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
+  const history: HistoricalSeason[] = [];
+  let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+
+  while (currentLeagueId) {
+    try {
+      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+        next: { revalidate: 86400 },
+      });
+      if (!leagueRes.ok) break;
+      const league = await leagueRes.json();
+
+      const [usersRes, rostersRes, winnersRes] = await Promise.all([
+        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
+        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
+        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/winners_bracket`, { next: { revalidate: 86400 } }),
+      ]);
+
+      const users = await usersRes.json();
+      const rosters = await rostersRes.json();
+      const winnersBracket = await winnersRes.json();
+
+      const userMap: Record<string, { name: string; avatar: string }> = {};
+      users.forEach((u: any) => {
+        const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
+        const avatar = u.avatar
+          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          : "https://sleepercdn.com/images/v2/owners/guy_select.png";
+        userMap[u.user_id] = { name: teamName, avatar };
+      });
+
+      const rosterMap: Record<number, { name: string; avatar: string }> = {};
+      rosters.forEach((r: any) => {
+        if (r.owner_id && userMap[r.owner_id]) {
+          rosterMap[r.roster_id] = userMap[r.owner_id];
+        }
+      });
+
+      let champion = null;
+      let runnerUp = null;
+
+      if (Array.isArray(winnersBracket) && winnersBracket.length > 0) {
+        const championshipGame = winnersBracket.find((m: any) => m.p === 1 || m.r === 3);
+        if (championshipGame) {
+          const champRosterId = championshipGame.w;
+          const runnerRosterId = championshipGame.l;
+
+          if (champRosterId && rosterMap[champRosterId]) champion = rosterMap[champRosterId];
+          if (runnerRosterId && rosterMap[runnerRosterId]) runnerUp = rosterMap[runnerRosterId];
+        }
+      }
+
+      history.push({
+        season: league.season,
+        leagueId: currentLeagueId,
+        champion,
+        runnerUp,
+      });
+
+      currentLeagueId = league.previous_league_id || null;
+    } catch (err) {
+      console.error(`Error resolving historical season ${currentLeagueId}:`, err);
+      break;
+    }
+  }
+
+  return history;
+}
+
+export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
+  let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+
+  const allTimeStats: Record<string, AllTimeManagerStats> = {};
+  
+  let highestSingleGameScore = { name: "", avatar: "", points: 0, season: "", week: 0 };
+  let lowestSingleGameScore = { name: "", avatar: "", points: 9999, season: "", week: 0 };
+  let biggestBlowout: GameRecord | null = null;
+  let closestMatchup: GameRecord | null = null;
+  
+  let highestSeasonPoints = { name: "", avatar: "", points: 0, season: "" };
+  let highestSeasonWins = { name: "", avatar: "", wins: 0, season: "" };
+
+  while (currentLeagueId) {
+    try {
+      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+        next: { revalidate: 86400 },
+      });
+      if (!leagueRes.ok) break;
+      const league = await leagueRes.json();
+
+      const [usersRes, rostersRes] = await Promise.all([
+        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
+        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
+      ]);
+
+      const users = await usersRes.json();
+      const rosters = await rostersRes.json();
+
+      const userMap: Record<string, { name: string; avatar: string }> = {};
+      users.forEach((u: any) => {
+        const name = u.metadata?.team_name || u.display_name || "Unknown";
+        const avatar = u.avatar
+          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          : "https://sleepercdn.com/images/v2/owners/guy_select.png";
+        userMap[u.user_id] = { name, avatar };
+      });
+
+      const rosterMap: Record<number, { ownerId: string; name: string; avatar: string }> = {};
+      
+      rosters.forEach((r: any) => {
+        const ownerId = r.owner_id || `roster_${r.roster_id}`;
+        const ownerInfo = userMap[r.owner_id] || { name: `Team ${r.roster_id}`, avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png" };
+        
+        rosterMap[r.roster_id] = { ownerId, name: ownerInfo.name, avatar: ownerInfo.avatar };
+
+        const wins = r.settings?.wins || 0;
+        const losses = r.settings?.losses || 0;
+        const ties = r.settings?.ties || 0;
+        const pointsFor = Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`);
+
+        if (pointsFor > highestSeasonPoints.points) {
+          highestSeasonPoints = { name: ownerInfo.name, avatar: ownerInfo.avatar, points: pointsFor, season: league.season };
+        }
+        if (wins > highestSeasonWins.wins) {
+          highestSeasonWins = { name: ownerInfo.name, avatar: ownerInfo.avatar, wins, season: league.season };
+        }
+
+        if (!allTimeStats[ownerId]) {
+          allTimeStats[ownerId] = {
+            ownerId,
+            name: ownerInfo.name,
+            avatar: ownerInfo.avatar,
+            wins: 0,
+            losses: 0,
+            ties: 0,
+            pointsFor: 0,
+            winPct: 0,
+            seasons: 0,
+          };
+        }
+
+        allTimeStats[ownerId].wins += wins;
+        allTimeStats[ownerId].losses += losses;
+        allTimeStats[ownerId].ties += ties;
+        allTimeStats[ownerId].pointsFor += pointsFor;
+        allTimeStats[ownerId].seasons += 1;
+        allTimeStats[ownerId].name = ownerInfo.name;
+        allTimeStats[ownerId].avatar = ownerInfo.avatar;
+      });
+
+      const playStartWeek = league.settings?.playoff_week_start || 15;
+      const weekPromises = [];
+      for (let w = 1; w < playStartWeek; w++) {
+        weekPromises.push(
+          fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/matchups/${w}`, { next: { revalidate: 86400 } }).then((res) =>
+            res.ok ? res.json().then((data) => ({ week: w, data })) : null
+          )
+        );
+      }
+
+      const weekResults = await Promise.all(weekPromises);
+
+      weekResults.forEach((weekObj) => {
+        if (!weekObj || !Array.isArray(weekObj.data)) return;
+        const { week, data: matchups } = weekObj;
+
+        const matchupGroups: Record<number, any[]> = {};
+        matchups.forEach((m: any) => {
+          if (m.matchup_id) {
+            if (!matchupGroups[m.matchup_id]) matchupGroups[m.matchup_id] = [];
+            matchupGroups[m.matchup_id].push(m);
+          }
+
+          const owner = rosterMap[m.roster_id];
+          if (owner && m.points > 0) {
+            if (m.points > highestSingleGameScore.points) {
+              highestSingleGameScore = { name: owner.name, avatar: owner.avatar, points: m.points, season: league.season, week };
+            }
+            if (m.points < lowestSingleGameScore.points) {
+              lowestSingleGameScore = { name: owner.name, avatar: owner.avatar, points: m.points, season: league.season, week };
+            }
+          }
+        });
+
+        Object.values(matchupGroups).forEach((pair) => {
+          if (pair.length === 2) {
+            const [teamA, teamB] = pair;
+            const ownerA = rosterMap[teamA.roster_id];
+            const ownerB = rosterMap[teamB.roster_id];
+
+            if (ownerA && ownerB && teamA.points > 0 && teamB.points > 0) {
+              const diff = Math.abs(teamA.points - teamB.points);
+              const winner = teamA.points >= teamB.points ? { owner: ownerA, pts: teamA.points } : { owner: ownerB, pts: teamB.points };
+              const loser = teamA.points < teamB.points ? { owner: ownerA, pts: teamA.points } : { owner: ownerB, pts: teamB.points };
+
+              const gameRec: GameRecord = {
+                winnerName: winner.owner.name,
+                winnerAvatar: winner.owner.avatar,
+                loserName: loser.owner.name,
+                loserAvatar: loser.owner.avatar,
+                winnerPoints: winner.pts,
+                loserPoints: loser.pts,
+                margin: Number(diff.toFixed(2)),
+                season: league.season,
+                week,
+              };
+
+              if (!biggestBlowout || gameRec.margin > biggestBlowout.margin) {
+                biggestBlowout = gameRec;
+              }
+              if (!closestMatchup || (gameRec.margin < closestMatchup.margin && gameRec.margin > 0)) {
+                closestMatchup = gameRec;
+              }
+            }
+          }
+        });
+      });
+
+      currentLeagueId = league.previous_league_id || null;
+    } catch (err) {
+      console.error(`Error processing records for league ${currentLeagueId}:`, err);
+      break;
+    }
+  }
+
+  const leaderboard = Object.values(allTimeStats).map((m) => {
+    const totalGames = m.wins + m.losses + m.ties;
+    const winPct = totalGames > 0 ? (m.wins / totalGames) * 100 : 0;
+    return { ...m, winPct };
+  });
+
+  return {
+    leaderboard: leaderboard.sort((a, b) => b.wins - a.wins || b.pointsFor - a.pointsFor),
+    highestSingleGameScore,
+    lowestSingleGameScore: lowestSingleGameScore.points === 9999 ? null : lowestSingleGameScore,
+    biggestBlowout,
+    closestMatchup,
+    highestSeasonPoints,
+    highestSeasonWins,
+  };
+}
+
+let cachedPlayers: Record<string, Player> | null = null;
+
+export async function getPlayerMap(): Promise<Record<string, Player>> {
+  if (cachedPlayers) return cachedPlayers;
+  try {
+    const res = await fetch("https://sleepercdn.com/content/nfl/players.json", {
+      next: { revalidate: 86400 },
+    });
+    const rawData = await res.json();
+    const playerMap: Record<string, Player> = {};
+
+    Object.keys(rawData).forEach((id) => {
+      const p = rawData[id];
+      playerMap[id] = {
+        id,
+        name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Player",
+        position: p.position || "DEF",
+        team: p.team || "FA",
+        age: p.age || 0,
+      };
+    });
+
+    cachedPlayers = playerMap;
+    return playerMap;
+  } catch (err) {
+    console.error("Error fetching player database:", err);
+    return {};
+  }
+}
+
+export async function getTransactions(): Promise<{ trades: TradeTransaction[]; waivers: WaiverTransaction[] }> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) return { trades: [], waivers: [] };
+
+  const trades: TradeTransaction[] = [];
+  const waivers: WaiverTransaction[] = [];
+
+  const weekPromises = [];
+  for (let w = 1; w <= 18; w++) {
+    weekPromises.push(
+      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`, {
+        next: { revalidate: 1800 },
+      }).then((res) => (res.ok ? res.json() : []))
+    );
+  }
+
+  const results = await Promise.all(weekPromises);
+
+  results.flat().forEach((t: any) => {
+    if (t.status !== "complete") return;
+
+    if (t.type === "trade") {
+      trades.push({
+        id: t.transaction_id,
+        timestamp: t.status_updated,
+        rosterIds: t.roster_ids || [],
+        adds: t.adds || {},
+        drops: t.drops || {},
+        draftPicks: t.draft_picks || [],
+        waiverBudget: t.waiver_budget || [],
+      });
+    } else if (t.type === "waiver") {
+      const addedKeys = Object.keys(t.adds || {});
+      const droppedKeys = Object.keys(t.drops || {});
+      waivers.push({
+        id: t.transaction_id,
+        timestamp: t.status_updated,
+        rosterId: t.roster_ids?.[0],
+        addedPlayerId: addedKeys[0] || null,
+        droppedPlayerId: droppedKeys[0] || null,
+        bid: t.settings?.waiver_bid || 0,
+        status: t.status,
+      });
+    }
+  });
+
+  return {
+    trades: trades.sort((a, b) => b.timestamp - a.timestamp),
+    waivers: waivers.sort((a, b) => b.timestamp - a.timestamp),
+  };
+}
+</file>
+
+</files>

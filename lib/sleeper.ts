@@ -1,5 +1,3 @@
-// lib/sleeper.ts
-
 export interface Team {
   rosterId: number;
   ownerId: string;
@@ -97,14 +95,37 @@ export interface WaiverTransaction {
   status: string;
 }
 
+export interface TeamMatchupDetail {
+  rosterId: number;
+  teamName: string;
+  ownerName?: string;
+  points: number;
+  projectedPoints?: number;
+  starterPoints: number;
+  benchPoints: number;
+  starters: string[];
+  bench: string[];
+  optimalLineupPoints?: number;
+  dynastyValueRank?: number;
+  personalityTrait?: string;
+}
+
+export interface WeeklyMatchupPair {
+  matchupId: number;
+  homeTeam: TeamMatchupDetail;
+  awayTeam: TeamMatchupDetail;
+  margin: number;
+}
+
+
 export async function getLeagueData() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) throw new Error("NEXT_PUBLIC_SLEEPER_LEAGUE_ID is not set");
 
   const [leagueRes, usersRes, rostersRes] = await Promise.all([
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}`, { next: { revalidate: 3600 } }),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`, { next: { revalidate: 3600 } }),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`, { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId, { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users", { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters", { next: { revalidate: 3600 } }),
   ]);
 
   const league = await leagueRes.json();
@@ -115,14 +136,14 @@ export async function getLeagueData() {
   users.forEach((u: any) => {
     const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
     const avatar = u.avatar
-      ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+      ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
       : "https://sleepercdn.com/images/v2/owners/guy_select.png";
     userMap[u.user_id] = { name: teamName, avatar };
   });
 
   const teams: Team[] = rosters.map((r: any) => {
     const owner = userMap[r.owner_id] || {
-      name: `Team ${r.roster_id}`,
+      name: "Team " + r.roster_id,
       avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png",
     };
 
@@ -134,7 +155,7 @@ export async function getLeagueData() {
       wins: r.settings?.wins || 0,
       losses: r.settings?.losses || 0,
       ties: r.settings?.ties || 0,
-      pointsFor: Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`),
+      pointsFor: Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0)),
       players: r.players || [],
     };
   });
@@ -142,12 +163,124 @@ export async function getLeagueData() {
   return { league, teams };
 }
 
+
+export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair[]> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) return [];
+
+  try {
+    const [matchupsRes, { league, teams }] = await Promise.all([
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week, {
+        next: { revalidate: 300 },
+      }),
+      getLeagueData(),
+    ]);
+
+    if (!matchupsRes.ok) return [];
+    const matchupsRaw = await matchupsRes.json();
+    const season = league?.season || "2026";
+
+    // Fetch official Sleeper player projections for this week
+    let projectionsMap: Record<string, number> = {};
+    try {
+      const projRes = await fetch(
+        `https://api.sleeper.app/v1/projections/nfl/regular/${season}/${week}`,
+        { next: { revalidate: 3600 } }
+      );
+      if (projRes.ok) {
+        const projData = await projRes.json();
+        if (Array.isArray(projData)) {
+          projData.forEach((p: any) => {
+            if (p?.player_id && p?.stats) {
+              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
+              projectionsMap[p.player_id] = pts;
+            }
+          });
+        } else if (typeof projData === "object" && projData !== null) {
+          Object.entries(projData).forEach(([pid, p]: [string, any]) => {
+            if (p?.stats) {
+              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
+              projectionsMap[pid] = pts;
+            }
+          });
+        }
+      }
+    } catch (projErr) {
+      console.warn("Could not fetch Sleeper projections:", projErr);
+    }
+
+    const teamMap = new Map(teams.map((t) => [t.rosterId, t]));
+    const matchupGroups: Record<number, any[]> = {};
+
+    matchupsRaw.forEach((m: any) => {
+      if (m.matchup_id) {
+        if (!matchupGroups[m.matchup_id]) matchupGroups[m.matchup_id] = [];
+        matchupGroups[m.matchup_id].push(m);
+      }
+    });
+
+    const matchupPairs: WeeklyMatchupPair[] = [];
+
+    Object.entries(matchupGroups).forEach(([matchupIdStr, pair]) => {
+      if (pair.length < 2) return;
+
+      const formatTeamDetail = (m: any): TeamMatchupDetail => {
+        const team = teamMap.get(m.roster_id);
+        const starters: string[] = m.starters || [];
+        const starterPoints = (m.starters_points || []).reduce((a: number, b: number) => a + (b || 0), 0);
+        
+        const allPlayers: string[] = m.players || [];
+        const bench = allPlayers.filter((p: string) => !starters.includes(p));
+        
+        const playersPointsMap: Record<string, number> = m.players_points || {};
+        const benchPoints = bench.reduce((sum, pId) => sum + (playersPointsMap[pId] || 0), 0);
+
+        // Calculate team projected points based on starter player projections
+        let projectedPoints = starters.reduce((sum, pid) => sum + (projectionsMap[pid] || 0), 0);
+
+        // Fallback to starter points if week is already completed and projections are not returned
+        if (projectedPoints === 0 && starterPoints > 0) {
+          projectedPoints = starterPoints;
+        }
+
+        return {
+          rosterId: m.roster_id,
+          teamName: team?.name || "Team " + m.roster_id,
+          ownerName: team?.name,
+          points: m.points || 0,
+          projectedPoints: Number(projectedPoints.toFixed(2)),
+          starterPoints: Number(starterPoints.toFixed(2)),
+          benchPoints: Number(benchPoints.toFixed(2)),
+          starters,
+          bench,
+        };
+      };
+
+      const home = formatTeamDetail(pair[0]);
+      const away = formatTeamDetail(pair[1]);
+      const margin = Number(Math.abs(home.points - away.points).toFixed(2));
+
+      matchupPairs.push({
+        matchupId: Number(matchupIdStr),
+        homeTeam: home,
+        awayTeam: away,
+        margin,
+      });
+    });
+
+    return matchupPairs;
+  } catch (err) {
+    console.error("Error fetching matchups for week " + week + ":", err);
+    return [];
+  }
+}
+
 export async function getDraftPicks() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) return [];
 
   try {
-    const res = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/traded_picks`, {
+    const res = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/traded_picks", {
       next: { revalidate: 3600 },
     });
     return await res.json();
@@ -157,22 +290,23 @@ export async function getDraftPicks() {
   }
 }
 
+
 export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
   const history: HistoricalSeason[] = [];
   let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
 
   while (currentLeagueId) {
     try {
-      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+      const leagueRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId, {
         next: { revalidate: 86400 },
       });
       if (!leagueRes.ok) break;
       const league = await leagueRes.json();
 
       const [usersRes, rostersRes, winnersRes] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/winners_bracket`, { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/users", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/rosters", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/winners_bracket", { next: { revalidate: 86400 } }),
       ]);
 
       const users = await usersRes.json();
@@ -183,7 +317,7 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
       users.forEach((u: any) => {
         const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
         const avatar = u.avatar
-          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
           : "https://sleepercdn.com/images/v2/owners/guy_select.png";
         userMap[u.user_id] = { name: teamName, avatar };
       });
@@ -197,7 +331,6 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
 
       let champion = null;
       let runnerUp = null;
-
       if (Array.isArray(winnersBracket) && winnersBracket.length > 0) {
         const championshipGame = winnersBracket.find((m: any) => m.p === 1 || m.r === 3);
         if (championshipGame) {
@@ -218,13 +351,14 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
 
       currentLeagueId = league.previous_league_id || null;
     } catch (err) {
-      console.error(`Error resolving historical season ${currentLeagueId}:`, err);
+      console.error("Error resolving historical season " + currentLeagueId + ":", err);
       break;
     }
   }
 
   return history;
 }
+
 
 export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
   let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
@@ -241,15 +375,15 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
 
   while (currentLeagueId) {
     try {
-      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+      const leagueRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId, {
         next: { revalidate: 86400 },
       });
       if (!leagueRes.ok) break;
       const league = await leagueRes.json();
 
       const [usersRes, rostersRes] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/users", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/rosters", { next: { revalidate: 86400 } }),
       ]);
 
       const users = await usersRes.json();
@@ -259,7 +393,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       users.forEach((u: any) => {
         const name = u.metadata?.team_name || u.display_name || "Unknown";
         const avatar = u.avatar
-          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
           : "https://sleepercdn.com/images/v2/owners/guy_select.png";
         userMap[u.user_id] = { name, avatar };
       });
@@ -267,15 +401,15 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       const rosterMap: Record<number, { ownerId: string; name: string; avatar: string }> = {};
       
       rosters.forEach((r: any) => {
-        const ownerId = r.owner_id || `roster_${r.roster_id}`;
-        const ownerInfo = userMap[r.owner_id] || { name: `Team ${r.roster_id}`, avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png" };
+        const ownerId = r.owner_id || "roster_" + r.roster_id;
+        const ownerInfo = userMap[r.owner_id] || { name: "Team " + r.roster_id, avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png" };
         
         rosterMap[r.roster_id] = { ownerId, name: ownerInfo.name, avatar: ownerInfo.avatar };
 
         const wins = r.settings?.wins || 0;
         const losses = r.settings?.losses || 0;
         const ties = r.settings?.ties || 0;
-        const pointsFor = Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`);
+        const pointsFor = Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0));
 
         if (pointsFor > highestSeasonPoints.points) {
           highestSeasonPoints = { name: ownerInfo.name, avatar: ownerInfo.avatar, points: pointsFor, season: league.season };
@@ -297,7 +431,6 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
             seasons: 0,
           };
         }
-
         allTimeStats[ownerId].wins += wins;
         allTimeStats[ownerId].losses += losses;
         allTimeStats[ownerId].ties += ties;
@@ -311,7 +444,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       const weekPromises = [];
       for (let w = 1; w < playStartWeek; w++) {
         weekPromises.push(
-          fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/matchups/${w}`, { next: { revalidate: 86400 } }).then((res) =>
+          fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/matchups/" + w, { next: { revalidate: 86400 } }).then((res) =>
             res.ok ? res.json().then((data) => ({ week: w, data })) : null
           )
         );
@@ -377,7 +510,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
 
       currentLeagueId = league.previous_league_id || null;
     } catch (err) {
-      console.error(`Error processing records for league ${currentLeagueId}:`, err);
+      console.error("Error processing records for league " + currentLeagueId + ":", err);
       break;
     }
   }
@@ -399,6 +532,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
   };
 }
 
+
 let cachedPlayers: Record<string, Player> | null = null;
 
 export async function getPlayerMap(): Promise<Record<string, Player>> {
@@ -414,7 +548,7 @@ export async function getPlayerMap(): Promise<Record<string, Player>> {
       const p = rawData[id];
       playerMap[id] = {
         id,
-        name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Player",
+        name: p.full_name || (p.first_name || "") + " " + (p.last_name || "").trim() || "Unknown Player",
         position: p.position || "DEF",
         team: p.team || "FA",
         age: p.age || 0,
@@ -429,6 +563,7 @@ export async function getPlayerMap(): Promise<Record<string, Player>> {
   }
 }
 
+
 export async function getTransactions(): Promise<{ trades: TradeTransaction[]; waivers: WaiverTransaction[] }> {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) return { trades: [], waivers: [] };
@@ -439,7 +574,7 @@ export async function getTransactions(): Promise<{ trades: TradeTransaction[]; w
   const weekPromises = [];
   for (let w = 1; w <= 18; w++) {
     weekPromises.push(
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`, {
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/transactions/" + w, {
         next: { revalidate: 1800 },
       }).then((res) => (res.ok ? res.json() : []))
     );
