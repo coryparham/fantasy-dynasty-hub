@@ -1,4 +1,3 @@
-// lib/fantasycalc.ts
 export async function getDynastyValues(): Promise<Record<string, number>> {
   try {
     // Query parameters: numQbs=2 (SuperFlex), numTeams=12, ppr=1 (Full PPR)
@@ -13,8 +12,27 @@ export async function getDynastyValues(): Promise<Record<string, number>> {
     const valueMap: Record<string, number> = {};
 
     data.forEach((item: any) => {
-      if (item.player?.sleeperId) {
-        valueMap[item.player.sleeperId] = item.value || 0;
+      const val = item.value ?? 0;
+      const player = item.player;
+
+      if (!player) return;
+
+      // 1. Map NFL players by Sleeper ID
+      if (player.sleeperId) {
+        valueMap[String(player.sleeperId)] = val;
+      }
+
+      // 2. Map draft picks by FantasyCalc draft info ({ year: 2027, round: 1 })
+      if (player.maybeDraftInfo) {
+        const { year, round } = player.maybeDraftInfo;
+        if (year && round) {
+          valueMap[`${year}_${round}`] = val;
+        }
+      }
+
+      // 3. Map draft picks and players by lowercased name string ("2027 1st", "2027 mid 1st", etc.)
+      if (player.name) {
+        valueMap[player.name.toLowerCase().trim()] = val;
       }
     });
 
