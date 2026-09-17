@@ -458,41 +458,44 @@ export async function POST(req: Request) {
     ]);
 
     // 2. Enrich matchups with positional starter details and historical H2H records
-    const enrichedMatchups = matchups.map((m: any) => {
-      const homeOwnerId = m.homeTeam?.ownerId || m.homeTeam?.rosterId;
-      const awayOwnerId = m.awayTeam?.ownerId || m.awayTeam?.rosterId;
+const enrichedMatchups = matchups.map((m: any) => {
+  const homeOwnerId = m.homeTeam?.ownerId || m.homeTeam?.rosterId;
+  const awayOwnerId = m.awayTeam?.ownerId || m.awayTeam?.rosterId;
 
-      const h2h = h2hMatrix[homeOwnerId]?.[awayOwnerId];
-      const headToHeadHistory = h2h
-        ? `${m.homeTeam.teamName} leads series ${h2h.wins}-${h2h.losses}${h2h.ties ? `-${h2h.ties}` : ""}`
-        : "No prior head-to-head match-ups on record";
+  // FIX 1: Cast h2hMatrix as a Record to resolve TS7053 error on homeOwnerId
+  const h2h = (h2hMatrix as Record<string, any>)[homeOwnerId]?.[awayOwnerId];
+  const headToHeadHistory = h2h
+    ? `${m.homeTeam.teamName} leads series ${h2h.wins}-${h2h.losses}${h2h.ties ? `-${h2h.ties}` : ""}`
+    : "No prior head-to-head match-ups on record";
 
-      const mapStartersWithPositions = (team: any) => {
-        if (!team?.starters || !Array.isArray(team.starters)) return [];
-        return team.starters.map((id: string) => {
-          const cleanId = String(id).trim();
-          const pData = playerMap[cleanId];
-          const name = team.playerNamesMap?.[cleanId] || playerNamesMap?.[cleanId] || pData?.name || `Player ${cleanId}`;
-          const pos = pData?.position || "FLEX";
-          const points = team.playersPointsMap?.[cleanId] ?? 0;
-          return { position: pos, name, points };
-        });
-      };
-
-      return {
-        ...m,
-        headToHeadHistory,
-        homeTeam: {
-          ...m.homeTeam,
-          positionalStarters: mapStartersWithPositions(m.homeTeam),
-        },
-        awayTeam: {
-          ...m.awayTeam,
-          positionalStarters: mapStartersWithPositions(m.awayTeam),
-        },
-      };
+  const mapStartersWithPositions = (team: any) => {
+    if (!team?.starters || !Array.isArray(team.starters)) return [];
+    return team.starters.map((id: string) => {
+      const cleanId = String(id).trim();
+      
+      // FIX 2: Cast playerMap as a Record to resolve TS7053 error on cleanId
+      const pData = (playerMap as Record<string, any>)[cleanId];
+      
+      const name = team.playerNamesMap?.[cleanId] || playerNamesMap?.[cleanId] || pData?.name || `Player ${cleanId}`;
+      const pos = pData?.position || "FLEX";
+      const points = team.playersPointsMap?.[cleanId] ?? 0;
+      return { position: pos, name, points };
     });
+  };
 
+  return {
+    ...m,
+    headToHeadHistory,
+    homeTeam: {
+      ...m.homeTeam,
+      positionalStarters: mapStartersWithPositions(m.homeTeam),
+    },
+    awayTeam: {
+      ...m.awayTeam,
+      positionalStarters: mapStartersWithPositions(m.awayTeam),
+    },
+  };
+});
     const prompt =
       reportType === "preview"
         ? buildPreviewPrompt(week, enrichedMatchups, managerPersonalities)

@@ -27,41 +27,42 @@ export default async function MatchupsPage() {
   const teamOwnerMap = new Map(teams.map((t) => [t.rosterId, t.ownerId]));
 
   // Helper to look up individual player dynasty values
-  const lookupValue = (key: string): number => {
-    if (!dynastyValues) return 0;
-    if (typeof (dynastyValues as any).get === "function") {
-      return (dynastyValues as Map<string, number>).get(key) || 0;
-    }
-    if (Array.isArray(dynastyValues)) {
-      const found = dynastyValues.find(
-        (item: any) =>
-          item.sleeperId === key ||
-          item.id === key ||
-          item.player?.sleeperId === key ||
-          item.name?.toLowerCase() === key.toLowerCase()
-      );
-      return found?.value || found?.tradeValue || 0;
-    }
-    return (dynastyValues as Record<string, number>)[key] || 0;
-  };
+const lookupValue = (key: string): number => {
+  if (!dynastyValues) return 0;
+  if (typeof (dynastyValues as any).get === "function") {
+    // FIX: Cast through 'unknown' first to prevent TS2352 overlap error
+    return (dynastyValues as unknown as Map<string, number>).get(key) || 0;
+  }
+  if (Array.isArray(dynastyValues)) {
+    const found = dynastyValues.find(
+      (item: any) =>
+        item.sleeperId === key ||
+        item.id === key ||
+        item.player?.sleeperId === key ||
+        item.name?.toLowerCase() === key.toLowerCase()
+    );
+    return found?.value || found?.tradeValue || 0;
+  }
+  return (dynastyValues as Record<string, number>)[key] || 0;
+};
 
-  // Compute Dynasty Values per team
-  const teamDynastyMap = new Map<
-    number,
-    { starterVal: number; benchVal: number; totalVal: number }
-  >();
+// Compute Dynasty Values per team
+const teamDynastyMap = new Map<
+  number,
+  { starterVal: number; benchVal: number; totalVal: number }
+>();
 
-  matchupPairs.forEach((pair) => {
-    [pair.homeTeam, pair.awayTeam].forEach((team) => {
-      const starterVal = team.starters.reduce((sum, pid) => sum + lookupValue(pid), 0);
-      const benchVal = team.bench.reduce((sum, pid) => sum + lookupValue(pid), 0);
-      teamDynastyMap.set(team.rosterId, {
-        starterVal,
-        benchVal,
-        totalVal: starterVal + benchVal,
-      });
+matchupPairs.forEach((pair) => {
+  [pair.homeTeam, pair.awayTeam].forEach((team) => {
+    const starterVal = team.starters.reduce((sum, pid) => sum + lookupValue(pid), 0);
+    const benchVal = team.bench.reduce((sum, pid) => sum + lookupValue(pid), 0);
+    teamDynastyMap.set(team.rosterId, {
+      starterVal,
+      benchVal,
+      totalVal: starterVal + benchVal,
     });
   });
+});
 
   // Archetype thresholds
   const allValues = Array.from(teamDynastyMap.values()).map((v) => v.totalVal);
