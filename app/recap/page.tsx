@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getWeeklyMatchups, WeeklyMatchupPair } from "@/lib/sleeper";
 import { getWeeklyReportFromDb, saveWeeklyReportToDb, getManagerProfiles } from "@/lib/supabase";
+import CopySocialButton from "@/components/CopySocialButton";
 
 export default function WeeklyReportPage() {
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
@@ -20,15 +21,15 @@ export default function WeeklyReportPage() {
       setReportContent("");
 
       try {
-        // 1. Check Supabase DB for an existing saved report
-        const existingReport = await getWeeklyReportFromDb(selectedWeek, reportType);
-        if (existingReport && existingReport.content) {
+        const [existingReport, weeklyData] = await Promise.all([
+          getWeeklyReportFromDb(selectedWeek, reportType),
+          getWeeklyMatchups(selectedWeek),
+        ]);
+
+        if (existingReport?.content) {
           setReportContent(existingReport.content);
         }
-
-        // 2. Fetch live Sleeper matchup data for context
-        const weeklyData = await getWeeklyMatchups(selectedWeek);
-        setMatchups(weeklyData);
+        setMatchups(weeklyData || []);
       } catch (err) {
         console.error("Error loading week data:", err);
         setErrorMsg("Failed to load matchup data for this week.");
@@ -40,6 +41,44 @@ export default function WeeklyReportPage() {
     loadWeekData();
   }, [selectedWeek, reportType]);
 
+  // STEP 1: Derived Weekly Highlights for Stat Cards
+  const weeklyHighlights = useMemo(() => {
+    if (!matchups.length) return null;
+
+    let highestScore = { team: "", pts: -1 };
+    let lowestScore = { team: "", pts: 9999 };
+    let biggestBlunder = { team: "", benchPts: -1 };
+    let closestGame = { match: "", diff: 9999 };
+
+    matchups.forEach((m) => {
+      const teams = [m.homeTeam, m.awayTeam];
+      teams.forEach((t) => {
+        if (!t) return;
+        const pts = reportType === "preview" ? (t.projectedPoints ?? 0) : t.points;
+        const bench = t.benchPoints ?? 0;
+
+        if (pts > highestScore.pts) highestScore = { team: t.teamName, pts };
+        if (pts < lowestScore.pts && pts > 0) lowestScore = { team: t.teamName, pts };
+        if (bench > biggestBlunder.benchPts) biggestBlunder = { team: t.teamName, benchPts: bench };
+      });
+
+      if (m.homeTeam && m.awayTeam) {
+        const homePts = reportType === "preview" ? (m.homeTeam.projectedPoints ?? 0) : m.homeTeam.points;
+        const awayPts = reportType === "preview" ? (m.awayTeam.projectedPoints ?? 0) : m.awayTeam.points;
+        const diff = Math.abs(homePts - awayPts);
+
+        if (diff < closestGame.diff && (homePts > 0 || awayPts > 0)) {
+          closestGame = {
+            match: `${m.homeTeam.teamName} vs ${m.awayTeam.teamName}`,
+            diff,
+          };
+        }
+      }
+    });
+
+    return { highestScore, lowestScore, biggestBlunder, closestGame };
+  }, [matchups, reportType]);
+
   const handleGenerateReport = async () => {
     if (matchups.length === 0) {
       setErrorMsg("No matchup data available for this week to generate a report.");
@@ -50,7 +89,6 @@ export default function WeeklyReportPage() {
     setErrorMsg("");
 
     try {
-      // Fetch custom manager personality traits from Supabase
       const managerPersonalities = await getManagerProfiles();
 
       const response = await fetch("/api/recap", {
@@ -73,7 +111,6 @@ export default function WeeklyReportPage() {
       const generatedHtml = data.content || data.recap;
       setReportContent(generatedHtml);
 
-      // Save generated report to Supabase for future fast loading
       await saveWeeklyReportToDb({
         week: selectedWeek,
         report_type: reportType,
@@ -100,7 +137,7 @@ export default function WeeklyReportPage() {
           </p>
         </div>
 
-        {/* Mode Switcher: Recap vs Preview */}
+        {/* Mode Switcher */}
         <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl">
           <button
             onClick={() => setReportType("recap")}
@@ -125,7 +162,7 @@ export default function WeeklyReportPage() {
         </div>
       </div>
 
-      {/* Controls Bar: Week Selector & Action Button */}
+      {/* Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-4 rounded-xl backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <label htmlFor="week-select" className="text-sm font-medium text-slate-300">
@@ -145,26 +182,84 @@ export default function WeeklyReportPage() {
           </select>
         </div>
 
-        <button
-          onClick={handleGenerateReport}
-          disabled={isGenerating || isLoading}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg shadow-amber-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isGenerating ? (
-            <>
-              <svg className="animate-spin h-4 w-4 text-slate-950" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Analyzing League Data...
-            </>
-          ) : (
-            <>
-              <span>⚡</span> {reportContent ? "Regenerate AI Report" : "Generate AI Report"}
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* One-Click Social Export Button */}
+          {reportContent && <CopySocialButton htmlContent={reportContent} />}
+
+          <button
+            onClick={handleGenerateReport}
+            disabled={isGenerating || isLoading}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg shadow-amber-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-slate-950" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Analyzing League Data...
+              </>
+            ) : (
+              <>
+                <span>⚡</span> {reportContent ? "Regenerate AI Report" : "Generate AI Report"}
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* STEP 1 UI: Highlight Badges Grid */}
+      {weeklyHighlights && weeklyHighlights.highestScore.pts > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">
+              {reportType === "preview" ? "Top Projection" : "High Scorer"}
+            </span>
+            <span className="text-sm font-bold text-slate-100 truncate block mt-0.5">
+              {weeklyHighlights.highestScore.team}
+            </span>
+            <span className="text-xs font-mono text-emerald-400 font-bold">
+              {weeklyHighlights.highestScore.pts.toFixed(2)} pts
+            </span>
+          </div>
+
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            <span className="text-[10px] uppercase font-bold text-rose-400 block tracking-wider">
+              {reportType === "preview" ? "Lowest Projection" : "Floor General"}
+            </span>
+            <span className="text-sm font-bold text-slate-100 truncate block mt-0.5">
+              {weeklyHighlights.lowestScore.team}
+            </span>
+            <span className="text-xs font-mono text-rose-400 font-bold">
+              {weeklyHighlights.lowestScore.pts.toFixed(2)} pts
+            </span>
+          </div>
+
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">
+              Bench Blunder King
+            </span>
+            <span className="text-sm font-bold text-slate-100 truncate block mt-0.5">
+              {weeklyHighlights.biggestBlunder.team}
+            </span>
+            <span className="text-xs font-mono text-amber-400 font-bold">
+              {weeklyHighlights.biggestBlunder.benchPts.toFixed(2)} bench pts
+            </span>
+          </div>
+
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            <span className="text-[10px] uppercase font-bold text-sky-400 block tracking-wider">
+              Closest Projected Game
+            </span>
+            <span className="text-xs font-semibold text-slate-200 truncate block mt-0.5">
+              {weeklyHighlights.closestGame.match}
+            </span>
+            <span className="text-xs font-mono text-sky-400 font-bold">
+              ±{weeklyHighlights.closestGame.diff.toFixed(2)} pts
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Error Notification */}
       {errorMsg && (
@@ -184,7 +279,6 @@ export default function WeeklyReportPage() {
         </div>
       ) : reportContent ? (
         <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6 shadow-xl">
-          {/* Render AI Raw HTML */}
           <div
             className="prose prose-invert max-w-none 
               prose-h2:text-2xl prose-h2:font-bold prose-h2:text-amber-400 prose-h2:border-b prose-h2:border-slate-800 prose-h2:pb-2 prose-h2:mt-6 prose-h2:mb-3
@@ -204,7 +298,7 @@ export default function WeeklyReportPage() {
         </div>
       )}
 
-      {/* Quick Matchups Context Bar */}
+      {/* Matchups Context Bar */}
       {matchups.length > 0 && (
         <div className="space-y-3 pt-4">
           <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400">

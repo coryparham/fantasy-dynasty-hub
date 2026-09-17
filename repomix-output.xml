@@ -63,6 +63,8 @@ app/
   press-conference/
     page.tsx
     PressConferenceClient.tsx
+  recap/
+    page.tsx
   records/
     page.tsx
   teams/
@@ -269,46 +271,6 @@ function TeamCard({ team }: { team: TeamMetrics }) {
       </div>
     </div>
   );
-}
-</file>
-
-<file path="app/api/recap/route.ts">
-// app/api/recap/route.ts
-import { NextResponse } from "next/server";
-
-export async function POST(req: Request) {
-  try {
-    const { matchupData, week } = await req.json();
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "API Key missing" }, { status: 500 });
-    }
-
-    const prompt = `You are an opinionated, funny, and sarcastic fantasy football analyst writing a recap for Week ${week} of a dynasty league. 
-    Here is the raw matchup data: ${JSON.stringify(matchupData)}
-    
-    Write a 3-paragraph witty summary including:
-    1. Fraud of the Week (Winner with bad stats or lowest scoring winner)
-    2. Heartbreak Award (Highest scoring loser)
-    3. Bench Blunder (Team that left key players on the bench)
-    Keep it playful, entertaining, and bold. Use HTML tags like <h3> and <p> for styling.`;
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    });
-
-    const data = await res.json();
-    const recapText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Failed to generate recap.";
-
-    return NextResponse.json({ recap: recapText });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch recap" }, { status: 500 });
-  }
 }
 </file>
 
@@ -520,6 +482,252 @@ export default async function MatchupsPage() {
 }
 </file>
 
+<file path="app/recap/page.tsx">
+"use client";
+
+import { useState, useEffect } from "react";
+import { getWeeklyMatchups, WeeklyMatchupPair } from "@/lib/sleeper";
+import { getWeeklyReportFromDb, saveWeeklyReportToDb, getManagerProfiles } from "@/lib/supabase";
+
+export default function WeeklyReportPage() {
+  const [selectedWeek, setSelectedWeek] = useState<number>(1);
+  const [reportType, setReportType] = useState<"recap" | "preview">("recap");
+  const [matchups, setMatchups] = useState<WeeklyMatchupPair[]>([]);
+  const [reportContent, setReportContent] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  useEffect(() => {
+    async function loadWeekData() {
+      setIsLoading(true);
+      setErrorMsg("");
+      setReportContent("");
+
+      try {
+        // 1. Check Supabase DB for an existing saved report
+        const existingReport = await getWeeklyReportFromDb(selectedWeek, reportType);
+        if (existingReport && existingReport.content) {
+          setReportContent(existingReport.content);
+        }
+
+        // 2. Fetch live Sleeper matchup data for context
+        const weeklyData = await getWeeklyMatchups(selectedWeek);
+        setMatchups(weeklyData);
+      } catch (err) {
+        console.error("Error loading week data:", err);
+        setErrorMsg("Failed to load matchup data for this week.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadWeekData();
+  }, [selectedWeek, reportType]);
+
+  const handleGenerateReport = async () => {
+    if (matchups.length === 0) {
+      setErrorMsg("No matchup data available for this week to generate a report.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setErrorMsg("");
+
+    try {
+      // Fetch custom manager personality traits from Supabase
+      const managerPersonalities = await getManagerProfiles();
+
+      const response = await fetch("/api/recap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          week: selectedWeek,
+          reportType,
+          matchups,
+          managerPersonalities,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Failed to generate AI report.");
+      }
+
+      const generatedHtml = data.content || data.recap;
+      setReportContent(generatedHtml);
+
+      // Save generated report to Supabase for future fast loading
+      await saveWeeklyReportToDb({
+        week: selectedWeek,
+        report_type: reportType,
+        content: generatedHtml,
+      });
+    } catch (err: any) {
+      console.error("Error generating report:", err);
+      setErrorMsg(err.message || "An unexpected error occurred while contacting AI.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 space-y-6">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-6">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
+            <span>🎙️</span> League AI Breakdown
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Automated banter, awards, and strategic insights powered by Gemini.
+          </p>
+        </div>
+
+        {/* Mode Switcher: Recap vs Preview */}
+        <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl">
+          <button
+            onClick={() => setReportType("recap")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              reportType === "recap"
+                ? "bg-amber-500 text-slate-950 shadow-md"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            🏆 Weekly Recap
+          </button>
+          <button
+            onClick={() => setReportType("preview")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              reportType === "preview"
+                ? "bg-amber-500 text-slate-950 shadow-md"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            🔮 Matchup Preview
+          </button>
+        </div>
+      </div>
+
+      {/* Controls Bar: Week Selector & Action Button */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-4 rounded-xl backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <label htmlFor="week-select" className="text-sm font-medium text-slate-300">
+            Select Week:
+          </label>
+          <select
+            id="week-select"
+            value={selectedWeek}
+            onChange={(e) => setSelectedWeek(Number(e.target.value))}
+            className="bg-slate-950 border border-slate-700 text-amber-400 font-bold px-3 py-1.5 rounded-lg focus:outline-none focus:border-amber-500 text-sm"
+          >
+            {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+              <option key={w} value={w}>
+                Week {w}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          onClick={handleGenerateReport}
+          disabled={isGenerating || isLoading}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg shadow-amber-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isGenerating ? (
+            <>
+              <svg className="animate-spin h-4 w-4 text-slate-950" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Analyzing League Data...
+            </>
+          ) : (
+            <>
+              <span>⚡</span> {reportContent ? "Regenerate AI Report" : "Generate AI Report"}
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Error Notification */}
+      {errorMsg && (
+        <div className="bg-red-950/50 border border-red-800/80 text-red-300 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
+          <span>⚠️</span> {errorMsg}
+        </div>
+      )}
+
+      {/* Content Display Area */}
+      {isLoading ? (
+        <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-12 text-center text-slate-400">
+          <div className="animate-pulse flex flex-col items-center gap-3">
+            <div className="h-6 w-48 bg-slate-800 rounded"></div>
+            <div className="h-4 w-64 bg-slate-800/60 rounded"></div>
+          </div>
+          <p className="mt-4 text-xs text-slate-500">Loading Week {selectedWeek} matchups...</p>
+        </div>
+      ) : reportContent ? (
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-6 md:p-8 space-y-6 shadow-xl">
+          {/* Render AI Raw HTML */}
+          <div
+            className="prose prose-invert max-w-none 
+              prose-h2:text-2xl prose-h2:font-bold prose-h2:text-amber-400 prose-h2:border-b prose-h2:border-slate-800 prose-h2:pb-2 prose-h2:mt-6 prose-h2:mb-3
+              prose-h3:text-lg prose-h3:font-semibold prose-h3:text-slate-200 prose-h3:mt-4 prose-h3:mb-2
+              prose-p:text-slate-300 prose-p:leading-relaxed prose-p:mb-4
+              prose-ul:list-disc prose-ul:pl-5 prose-ul:space-y-1 prose-li:text-slate-300"
+            dangerouslySetInnerHTML={{ __html: reportContent }}
+          />
+        </div>
+      ) : (
+        <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-12 text-center space-y-4">
+          <div className="text-4xl">🤖</div>
+          <h3 className="text-xl font-bold text-slate-200">No report generated for Week {selectedWeek}</h3>
+          <p className="text-slate-400 text-sm max-w-md mx-auto">
+            Click the <strong className="text-amber-400">"Generate AI Report"</strong> button above to have Gemini craft a detailed {reportType} for this week.
+          </p>
+        </div>
+      )}
+
+      {/* Quick Matchups Context Bar */}
+      {matchups.length > 0 && (
+        <div className="space-y-3 pt-4">
+          <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400">
+            Week {selectedWeek} Matchups Context ({reportType === "preview" ? "Official Sleeper Projections" : "Actual Scores"})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {matchups.map((m) => (
+              <div
+                key={m.matchupId}
+                className="bg-slate-900/50 border border-slate-800/80 p-3 rounded-xl text-xs flex justify-between items-center"
+              >
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-200">{m.homeTeam.teamName}</p>
+                  <p className="text-slate-400">
+                    {reportType === "preview" && m.homeTeam.projectedPoints !== undefined
+                      ? `${m.homeTeam.projectedPoints.toFixed(2)} proj pts`
+                      : `${m.homeTeam.points.toFixed(2)} pts`}
+                  </p>
+                </div>
+                <span className="text-slate-600 font-bold px-2">VS</span>
+                <div className="space-y-1 text-right">
+                  <p className="font-semibold text-slate-200">{m.awayTeam.teamName}</p>
+                  <p className="text-slate-400">
+                    {reportType === "preview" && m.awayTeam.projectedPoints !== undefined
+                      ? `${m.awayTeam.projectedPoints.toFixed(2)} proj pts`
+                      : `${m.awayTeam.points.toFixed(2)} pts`}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
 <file path="app/teams/[id]/page.tsx">
 // app/teams/[id]/page.tsx
 import { getLeagueData, getPlayerMap, Player } from "@/lib/sleeper";
@@ -706,26 +914,6 @@ body {
 }
 </file>
 
-<file path="lib/supabase.ts">
-// lib/supabase.ts
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-export interface PressPost {
-  id: string;
-  created_at: string;
-  roster_id: number;
-  manager_name: string;
-  category: "Post-Game" | "Trash Talk" | "Trade Block";
-  headline: string;
-  content: string;
-}
-</file>
-
 <file path="public/file.svg">
 <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
 </file>
@@ -876,6 +1064,498 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
     "**/*.mts"
   ],
   "exclude": ["node_modules"]
+}
+</file>
+
+<file path="app/api/recap/route.ts">
+import { NextResponse } from "next/server";
+
+export interface TeamMatchupDetail {
+  rosterId: number;
+  teamName: string;
+  ownerName?: string;
+  points: number;
+  projectedPoints?: number;
+  starterPoints: number;
+  benchPoints: number;
+  starters: string[];
+  bench: string[];
+  optimalLineupPoints?: number;
+  dynastyValueRank?: number;
+  personalityTrait?: string;
+}
+
+export interface MatchupPair {
+  matchupId: number;
+  homeTeam: TeamMatchupDetail;
+  awayTeam: TeamMatchupDetail;
+  margin?: number;
+}
+
+export interface ReportRequestBody {
+  week: number;
+  leagueId?: string;
+  reportType?: "recap" | "preview";
+  matchups: MatchupPair[];
+  managerPersonalities?: Record<string, string>;
+  forceRefresh?: boolean;
+}
+
+function cleanGeminiHtmlOutput(rawText: string): string {
+  if (!rawText) return "";
+  let cleaned = rawText
+    .replace(/^```html\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  cleaned = cleaned
+    .replace(/^(HTML tags\?|Checklist|Verification|Notes:).*$/gim, "")
+    .trim();
+
+  return cleaned;
+}
+
+interface ComputedHighlights {
+  fraudWinner: TeamMatchupDetail;
+  fraudPts: number;
+  heartbreakLoser: TeamMatchupDetail;
+  heartbreakPts: number;
+  benchBlunderTeam: TeamMatchupDetail;
+  benchBlunderPts: number;
+  gotwHome: TeamMatchupDetail;
+  gotwAway: TeamMatchupDetail;
+  gotwMargin: number;
+}
+
+function computeWeeklyHighlights(matchups: MatchupPair[]): ComputedHighlights | null {
+  if (!matchups || !Array.isArray(matchups) || matchups.length === 0) return null;
+
+  let fraudWinner: TeamMatchupDetail | null = null;
+  let lowestWinnerPts = Infinity;
+
+  let heartbreakLoser: TeamMatchupDetail | null = null;
+  let highestLoserPts = -1;
+
+  let benchBlunderTeam: TeamMatchupDetail | null = null;
+  let highestBenchPts = -1;
+
+  let gotwMatchup: MatchupPair | null = null;
+  let smallestMargin = Infinity;
+
+  matchups.forEach((m) => {
+    if (!m || !m.homeTeam || !m.awayTeam) return;
+
+    const homePts = Number(m.homeTeam.points) || 0;
+    const awayPts = Number(m.awayTeam.points) || 0;
+
+    const winner = homePts >= awayPts ? m.homeTeam : m.awayTeam;
+    const loser = homePts < awayPts ? m.homeTeam : m.awayTeam;
+    const winnerPts = Math.max(homePts, awayPts);
+    const loserPts = Math.min(homePts, awayPts);
+    const margin = Math.abs(homePts - awayPts);
+
+    // Fraud of the week: Winner with lowest score
+    if (winnerPts < lowestWinnerPts) {
+      lowestWinnerPts = winnerPts;
+      fraudWinner = winner;
+    }
+
+    // Heartbreak award: Loser with highest score
+    if (loserPts > highestLoserPts) {
+      highestLoserPts = loserPts;
+      heartbreakLoser = loser;
+    }
+
+    // Bench blunder: Highest bench points left unstarted
+    const homeBench = Number(m.homeTeam.benchPoints) || 0;
+    const awayBench = Number(m.awayTeam.benchPoints) || 0;
+
+    if (homeBench > highestBenchPts) {
+      highestBenchPts = homeBench;
+      benchBlunderTeam = m.homeTeam;
+    }
+    if (awayBench > highestBenchPts) {
+      highestBenchPts = awayBench;
+      benchBlunderTeam = m.awayTeam;
+    }
+
+    // Game of the week: Smallest margin of victory
+    if (margin < smallestMargin) {
+      smallestMargin = margin;
+      gotwMatchup = m;
+    }
+  });
+
+  if (!fraudWinner || !heartbreakLoser || !benchBlunderTeam || !gotwMatchup) {
+    return null;
+  }
+
+  return {
+    fraudWinner,
+    fraudPts: (fraudWinner as TeamMatchupDetail).points || 0,
+    heartbreakLoser,
+    heartbreakPts: (heartbreakLoser as TeamMatchupDetail).points || 0,
+    benchBlunderTeam,
+    benchBlunderPts: (benchBlunderTeam as TeamMatchupDetail).benchPoints || 0,
+    gotwHome: (gotwMatchup as MatchupPair).homeTeam,
+    gotwAway: (gotwMatchup as MatchupPair).awayTeam,
+    gotwMargin: Number(smallestMargin.toFixed(2)),
+  };
+}
+
+function buildRecapPrompt(
+  week: number,
+  matchups: MatchupPair[],
+  personalities?: Record<string, string>
+): string {
+  const highlights = computeWeeklyHighlights(matchups);
+  const validMatchups = matchups.filter((m) => m && m.homeTeam && m.awayTeam);
+  const totalMatchups = validMatchups.length;
+
+  const formattedMatchups = validMatchups
+    .map((m, idx) => {
+      const home = m.homeTeam;
+      const away = m.awayTeam;
+
+      const homePts = Number(home.points) || 0;
+      const awayPts = Number(away.points) || 0;
+      const margin = Math.abs(homePts - awayPts).toFixed(2);
+      const winner = homePts >= awayPts ? home : away;
+      const loser = homePts < awayPts ? home : away;
+
+      const winnerPersona = personalities?.[winner.teamName] || winner.personalityTrait || "Competitor";
+      const loserPersona = personalities?.[loser.teamName] || loser.personalityTrait || "Competitor";
+
+      return `Matchup ${idx + 1} of ${totalMatchups}:
+- Winner: ${winner.teamName} (${(winner.points || 0).toFixed(2)} pts | Starters: ${(winner.starterPoints || 0).toFixed(2)} | Bench: ${(winner.benchPoints || 0).toFixed(2)}) [Persona: ${winnerPersona}]
+- Loser: ${loser.teamName} (${(loser.points || 0).toFixed(2)} pts | Starters: ${(loser.starterPoints || 0).toFixed(2)} | Bench: ${(loser.benchPoints || 0).toFixed(2)}) [Persona: ${loserPersona}]
+- Margin: ${margin} points`;
+    })
+    .join("\n\n");
+
+  const highlightsSection = highlights
+    ? `PRE-CALCULATED AWARD WINNERS FOR WEEK ${week}:
+- Fraud of the Week: ${highlights.fraudWinner.teamName} (${highlights.fraudPts.toFixed(2)} pts in a win)
+- Heartbreak Award: ${highlights.heartbreakLoser.teamName} (${highlights.heartbreakPts.toFixed(2)} pts in a loss)
+- Bench Blunder: ${highlights.benchBlunderTeam.teamName} (${highlights.benchBlunderPts.toFixed(2)} bench pts)
+- Game of the Week: ${highlights.gotwHome.teamName} vs ${highlights.gotwAway.teamName} (Margin: ${highlights.gotwMargin} pts)`
+    : "";
+
+  return `Write the official Week ${week} Dynasty Fantasy Football League Recap.
+
+${highlightsSection}
+
+DATA FOR ALL ${totalMatchups} WEEK ${week} MATCHUPS:
+${formattedMatchups}
+
+CRITICAL: You MUST output all ${totalMatchups} matchups in order. Keep each game write-up to 3 to 4 punchy, analytical sentences so that every game is completed without truncating.
+
+MANDATORY OUTPUT STRUCTURE (MUST OUTPUT ONLY CLEAN HTML WITH TAILWIND CSS):
+
+SECTION 1: HERO HEADER
+<div class="mb-6 p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border border-slate-700/80 shadow-md">
+  <h2 class="text-2xl font-black text-white tracking-tight mb-2">🏈 Week ${week} Breakdown: [Witty Catchy Headline]</h2>
+  <p class="text-slate-300 text-sm leading-relaxed">[2 sharp sentences setting up the general league mood and story]</p>
+</div>
+
+SECTION 2: WEEKLY HONORS & BADGES GRID
+<div class="mb-8">
+  <h3 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">🏆 Weekly Honors & Badges</h3>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-amber-400 font-bold text-sm mb-1">
+        <span>🤡</span> <span>Fraud of the Week</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">${highlights ? highlights.fraudWinner.teamName : "[Fraud Winner]"}</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences roasting why they got lucky or scored low despite winning]</p>
+    </div>
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-rose-400 font-bold text-sm mb-1">
+        <span>💔</span> <span>Heartbreak Award</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">${highlights ? highlights.heartbreakLoser.teamName : "[Heartbreak Loser]"}</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences lamenting their tough-luck loss despite putting up big points]</p>
+    </div>
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-yellow-400 font-bold text-sm mb-1">
+        <span>🪵</span> <span>Bench Blunder of the Week</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">${highlights ? highlights.benchBlunderTeam.teamName : "[Bench Blunder Team]"}</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences roasting the manager for leaving points on the pine]</p>
+    </div>
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-indigo-400 font-bold text-sm mb-1">
+        <span>⚔️</span> <span>Game of the Week</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">${highlights ? `${highlights.gotwHome.teamName} vs ${highlights.gotwAway.teamName}` : "[Winner vs Loser]"}</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences recapping the most chaotic or razor-thin matchup]</p>
+    </div>
+
+  </div>
+</div>
+
+SECTION 3: MATCHUP CARDS
+Render ALL ${totalMatchups} matchups in order. Wrap them in a single container:
+
+<h3 class="text-xl font-bold text-indigo-400 mb-4 flex items-center gap-2">⚔️ Matchup Breakdown (${totalMatchups} Games)</h3>
+<div class="space-y-4">
+  <!-- Repeat EXACTLY ${totalMatchups} times for each game: -->
+  <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 shadow-md">
+    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800">
+      <div class="flex items-center gap-2 text-sm font-semibold">
+        <span class="text-emerald-400 font-bold">[Winner Name]</span>
+        <span class="px-2 py-0.5 text-xs font-mono font-bold bg-emerald-500/10 text-emerald-400 rounded">[Winner Points]</span>
+        <span class="text-xs text-slate-500 font-normal">def.</span>
+        <span class="text-slate-300">[Loser Name]</span>
+        <span class="px-2 py-0.5 text-xs font-mono bg-slate-800 text-slate-400 rounded">[Loser Points]</span>
+      </div>
+      <span class="text-xs font-semibold uppercase text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">Margin: [Margin] pts</span>
+    </div>
+    <p class="text-amber-300 font-medium italic text-xs mb-1.5">"[Punchy witty one-liner roasting or praising the result]"</p>
+    <p class="text-slate-300 text-xs leading-relaxed">[3 to 4 concise sentences analyzing why the winner prevailed, key starter performances, bench points left unstarted, and managerial lineup decisions.]</p>
+  </div>
+</div>`;
+}
+
+function buildPreviewPrompt(
+  week: number,
+  matchups: MatchupPair[],
+  personalities?: Record<string, string>
+): string {
+  const validMatchups = matchups.filter((m) => m && m.homeTeam && m.awayTeam);
+  const totalMatchups = validMatchups.length;
+
+  const formattedMatchups = validMatchups
+    .map((m, idx) => {
+      const home = m.homeTeam;
+      const away = m.awayTeam;
+      const homePersona = personalities?.[home.teamName] || home.personalityTrait || "Contender";
+      const awayPersona = personalities?.[away.teamName] || away.personalityTrait || "Rebuilder";
+
+      const homeProj = home.projectedPoints != null ? Number(home.projectedPoints).toFixed(2) : "N/A";
+      const awayProj = away.projectedPoints != null ? Number(away.projectedPoints).toFixed(2) : "N/A";
+
+      return `Matchup ${idx + 1} of ${totalMatchups}:
+- Home: ${home.teamName} (${homePersona}) | Sleeper Projected: ${homeProj} pts
+- Away: ${away.teamName} (${awayPersona}) | Sleeper Projected: ${awayProj} pts`;
+    })
+    .join("\n\n");
+
+  return `Write the official Week ${week} Dynasty Fantasy Football League Matchup Preview based on these official Sleeper projected scores:
+
+${formattedMatchups}
+
+IMPORTANT: You MUST complete ALL ${totalMatchups} MATCHUPS without truncating. Keep each lookahead to 3 to 4 crisp sentences.
+
+MANDATORY OUTPUT STRUCTURE (MUST OUTPUT ONLY CLEAN HTML WITH TAILWIND CSS):
+
+SECTION 1: HERO HEADER
+<div class="mb-6 p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-amber-950 border border-slate-700/80 shadow-md">
+  <h2 class="text-2xl font-black text-white tracking-tight mb-2">🔮 Week ${week} Matchup Preview: [Witty Catchy Headline]</h2>
+  <p class="text-slate-300 text-sm leading-relaxed">[2 sharp sentences setting up the upcoming week and projection storylines]</p>
+</div>
+
+SECTION 2: SPOTLIGHT & LOCK OF THE WEEK GRID
+<div class="mb-8">
+  <h3 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">⭐ Week ${week} Spotlight & Predictions</h3>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-amber-400 font-bold text-sm mb-1">
+        <span>🔥</span> <span>Headliner Clash</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">[Team A vs Team B]</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences highlighting the marquee matchup on the slate]</p>
+    </div>
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-emerald-400 font-bold text-sm mb-1">
+        <span>🔒</span> <span>Lock of the Week</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">[Projected Winner Name]</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences explaining why this team has the safest path to victory]</p>
+    </div>
+
+    <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30">
+      <div class="flex items-center gap-2 text-rose-400 font-bold text-sm mb-1">
+        <span>⚠️</span> <span>Upset Alert</span>
+      </div>
+      <h4 class="text-base font-semibold text-white mb-1">[Underdog Team Name]</h4>
+      <p class="text-xs text-slate-300 leading-relaxed">[2 sentences analyzing how an underdog could shock their opponent this week]</p>
+    </div>
+
+  </div>
+</div>
+
+SECTION 3: MATCHUP LOOKAHEAD CARDS
+Render ALL ${totalMatchups} matchups in order. Wrap them in a single container:
+
+<h3 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">🔮 Matchup Lookaheads (${totalMatchups} Games)</h3>
+<div class="space-y-4">
+  <!-- Repeat EXACTLY ${totalMatchups} times for each game: -->
+  <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 shadow-md">
+    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800">
+      <div class="flex items-center gap-2 text-sm font-semibold">
+        <span class="text-white font-bold">[Home Team Name]</span>
+        <span class="px-2 py-0.5 text-xs font-mono font-bold bg-amber-500/10 text-amber-400 rounded">[Home Projected Pts] proj</span>
+        <span class="text-xs text-slate-500 font-normal">VS</span>
+        <span class="text-slate-300">[Away Team Name]</span>
+        <span class="px-2 py-0.5 text-xs font-mono bg-slate-800 text-slate-400 rounded">[Away Projected Pts] proj</span>
+      </div>
+      <span class="text-xs font-semibold uppercase text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full">Proj Margin: [Margin] pts</span>
+    </div>
+    <p class="text-amber-300 font-medium italic text-xs mb-1.5">"[Witty punchy one-liner setting up this upcoming battle]"</p>
+    <p class="text-slate-300 text-xs leading-relaxed">[3 to 4 sentence breakdown analyzing positional matchups, projected x-factors, key sleeper/bust risks, line swings, and predicted winner.]</p>
+  </div>
+</div>`;
+}
+
+export function GET() {
+  return NextResponse.json({
+    message: "Recap API endpoint active. Send a POST request with week and matchups data.",
+  });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body: ReportRequestBody = await req.json();
+    const { week, reportType = "recap", matchups, managerPersonalities } = body;
+
+    // Validate request payload
+    if (!week || !matchups || !Array.isArray(matchups) || matchups.length === 0) {
+      return NextResponse.json(
+        { error: "Invalid request payload. 'week' and non-empty 'matchups' array are required." },
+        { status: 400 }
+      );
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "GEMINI_API_KEY is not configured in environment variables." },
+        { status: 500 }
+      );
+    }
+
+    const prompt =
+      reportType === "preview"
+        ? buildPreviewPrompt(week, matchups, managerPersonalities)
+        : buildRecapPrompt(week, matchups, managerPersonalities);
+
+    const validCount = matchups.filter((m) => m && m.homeTeam && m.awayTeam).length;
+
+    const systemInstructionText =
+      reportType === "preview"
+        ? `You are an opinionated, hilarious fantasy football analyst. Output ONLY raw HTML with Tailwind CSS. Never output markdown code blocks. You MUST generate Section 1 (Hero Header), Section 2 (Spotlight & Predictions Grid), and Section 3 (All ${validCount} Matchup Lookahead Cards) with concise 3-4 sentence game write-ups without truncating.`
+        : `You are an opinionated, hilarious fantasy football analyst. Output ONLY raw HTML with Tailwind CSS. Never output markdown code blocks. You MUST generate Section 1 (Hero Header), Section 2 (Weekly Honors & Badges Grid), and Section 3 (All ${validCount} Matchup Breakdown Cards) with concise 3-4 sentence game recaps without truncating.`;
+
+    // Updated candidate models list with active Gemini 3 Flash models
+    const candidateModels = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3-flash-preview",
+      "gemini-1.5-flash",
+    ];
+
+    const apiVersions = ["v1beta", "v1"];
+    const attemptedErrors: string[] = [];
+    let isQuotaError = false;
+    let rawContent = "";
+
+    modelLoop: for (const model of candidateModels) {
+      for (const apiVer of apiVersions) {
+        const geminiEndpoint = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${apiKey}`;
+
+        try {
+          const response = await fetch(geminiEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [
+                  {
+                    text: systemInstructionText,
+                  },
+                ],
+              },
+              contents: [
+                {
+                  parts: [{ text: prompt }],
+                },
+              ],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 8192,
+              },
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            rawContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (rawContent) {
+              break modelLoop;
+            }
+          } else {
+            const errorText = await response.text();
+            let parsedMessage = errorText;
+            try {
+              const errObj = JSON.parse(errorText);
+              parsedMessage = errObj.error?.message || errorText;
+            } catch {}
+
+            if (response.status === 429 || parsedMessage.toLowerCase().includes("quota exceeded")) {
+              isQuotaError = true;
+            }
+
+            attemptedErrors.push(`[${model}/${apiVer}]: ${parsedMessage}`);
+          }
+        } catch (fetchErr: any) {
+          attemptedErrors.push(`[${model}/${apiVer}]: ${fetchErr.message || "Network request failed"}`);
+        }
+      }
+    }
+
+    if (!rawContent) {
+      if (isQuotaError) {
+        return NextResponse.json(
+          { error: "Gemini API rate limit or quota exceeded. Please wait 10–15 seconds and try again." },
+          { status: 429 }
+        );
+      }
+
+      const combinedErrorSummary = attemptedErrors.slice(0, 2).join(" | ");
+      return NextResponse.json(
+        { error: `Gemini API request failed: ${combinedErrorSummary}` },
+        { status: 502 }
+      );
+    }
+
+    const sanitizedHtml = cleanGeminiHtmlOutput(rawContent);
+
+    return NextResponse.json({
+      success: true,
+      reportType,
+      week,
+      recap: sanitizedHtml,
+      content: sanitizedHtml,
+      generatedAt: new Date().toISOString(),
+    });
+
+  } catch (error: any) {
+    console.error("Error in recap API route:", error);
+    return NextResponse.json(
+      { error: `Internal server error generating report: ${error.message || error}` },
+      { status: 500 }
+    );
+  }
 }
 </file>
 
@@ -1854,6 +2534,192 @@ export async function getDynastyValues(): Promise<Record<string, number>> {
 }
 </file>
 
+<file path="lib/supabase.ts">
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export interface PressPost {
+  id: string;
+  created_at: string;
+  roster_id: number;
+  manager_name: string;
+  category: "Post-Game" | "Trash Talk" | "Trade Block";
+  headline: string;
+  content: string;
+}
+
+export interface WeeklyReport {
+  id: string;
+  created_at: string;
+  league_id: string;
+  week: number;
+  report_type: "recap" | "preview";
+  content: string;
+}
+
+export interface ManagerProfile {
+  id?: string;
+  roster_id: number;
+  owner_id: string;
+  manager_name: string;
+  personality_trait?: string;
+  bio?: string;
+  rival_roster_id?: number;
+}
+
+/**
+ * Retrieves an archived AI weekly recap or preview from Supabase.
+ */
+export async function getWeeklyReportFromDb(
+  week: number,
+  reportType: "recap" | "preview" = "recap"
+): Promise<WeeklyReport | null> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId || !supabaseUrl) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("weekly_reports")
+      .select("*")
+      .eq("league_id", leagueId)
+      .eq("week", week)
+      .eq("report_type", reportType)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Supabase query error for weekly report:", error.message);
+      return null;
+    }
+
+    return data as WeeklyReport | null;
+  } catch (err) {
+    console.error("Error fetching weekly report from DB:", err);
+    return null;
+  }
+}
+
+/**
+ * Saves or updates a generated AI weekly recap/preview in Supabase.
+ */
+export async function saveWeeklyReportToDb(report: {
+  week: number;
+  report_type: "recap" | "preview";
+  content: string;
+}): Promise<WeeklyReport | null> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId || !supabaseUrl) return null;
+
+  try {
+    const payload = {
+      league_id: leagueId,
+      week: report.week,
+      report_type: report.report_type,
+      content: report.content,
+    };
+
+    const { data, error } = await supabase
+      .from("weekly_reports")
+      .upsert(payload, { onConflict: "league_id,week,report_type" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to save weekly report to Supabase:", error.message);
+      return null;
+    }
+
+    return data as WeeklyReport;
+  } catch (err) {
+    console.error("Error saving weekly report:", err);
+    return null;
+  }
+}
+
+/**
+ * Fetches all custom manager profiles and personality traits.
+ */
+export async function getManagerProfiles(): Promise<Record<string, string>> {
+  if (!supabaseUrl) return {};
+
+  try {
+    const { data, error } = await supabase
+      .from("manager_profiles")
+      .select("manager_name, personality_trait");
+
+    if (error || !data) return {};
+
+    const personalityMap: Record<string, string> = {};
+    data.forEach((row) => {
+      if (row.manager_name && row.personality_trait) {
+        personalityMap[row.manager_name] = row.personality_trait;
+      }
+    });
+
+    return personalityMap;
+  } catch (err) {
+    console.error("Error loading manager profiles:", err);
+    return {};
+  }
+}
+
+/**
+ * Fetches press conference posts.
+ */
+export async function getPressPosts(): Promise<PressPost[]> {
+  if (!supabaseUrl) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from("press_posts")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching press posts:", error.message);
+      return [];
+    }
+
+    return data as PressPost[];
+  } catch (err) {
+    console.error("Error in getPressPosts:", err);
+    return [];
+  }
+}
+
+/**
+ * Saves a new press conference post.
+ */
+export async function createPressPost(
+  post: Omit<PressPost, "id" | "created_at">
+): Promise<PressPost | null> {
+  if (!supabaseUrl) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("press_posts")
+      .insert([post])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating press post:", error.message);
+      return null;
+    }
+
+    return data as PressPost;
+  } catch (err) {
+    console.error("Error in createPressPost:", err);
+    return null;
+  }
+}
+</file>
+
 <file path=".gitignore">
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
@@ -2508,38 +3374,236 @@ export default async function RecordsPage() {
 </file>
 
 <file path="components/Navbar.tsx">
-// components/Navbar.tsx
-import Link from "next/link";
+"use client";
+
+import { useState, useEffect } from "react";
+
+// Standard anchor fallback component for standalone environment compatibility
+const Link = ({
+  href,
+  children,
+  className,
+  onClick,
+}: {
+  href: string;
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+}) => (
+  <a href={href} className={className} onClick={onClick}>
+    {children}
+  </a>
+);
 
 export default function Navbar() {
+  const [pathname, setPathname] = useState("/");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setPathname(window.location.pathname || "/");
+    }
+  }, []);
+
+  const primaryNavItems = [
+    { label: "Standings", href: "/" },
+    { label: "Matchups", href: "/matchups" },
+    { label: "AI Recaps", href: "/recap", badge: "AI", icon: "🎙️" },
+    { label: "Press Room", href: "/press-conference" },
+    { label: "Trade Feed", href: "/trades" },
+  ];
+
+  const leagueMoreItems = [
+    { label: "Draft Capital", href: "/draft-capital", icon: "🎟️" },
+    { label: "Managers", href: "/managers", icon: "👥" },
+    { label: "Record Book", href: "/records", icon: "🏆" },
+    { label: "Trophy Case", href: "/trophies", icon: "🥇" },
+    { label: "Playoffs", href: "/playoffs", icon: "🏈" },
+    { label: "Age Matrix", href: "/analytics/age-production", icon: "📊" },
+    { label: "Constitution", href: "/constitution", icon: "📜" },
+  ];
+
   return (
-    <nav className="bg-slate-900 border-b border-slate-800 px-6 py-4">
-      <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
-        <Link href="/" className="text-xl font-extrabold text-amber-500">
-          Dynasty Hub
-        </Link>
-        <div className="flex flex-wrap items-center space-x-6 text-sm font-medium text-slate-300">
-          <Link href="/" className="hover:text-amber-400 transition">Standings</Link>
-          <Link href="/matchups" className="hover:text-amber-400 transition">Matchups</Link>
-          <Link href="/playoffs" className="hover:text-amber-400 transition">Playoffs</Link>
-          <Link href="/press-conference" className="hover:text-amber-400 transition">Press Room</Link>
-          <Link href="/draft-capital" className="hover:text-amber-400 transition">Draft Capital</Link>
-          <Link href="/trades" className="hover:text-amber-400 transition">Trade Feed</Link>
-          <Link href="/managers" className="hover:text-amber-400 transition">Managers</Link>
-          <Link href="/records" className="hover:text-amber-400 transition">Record Book</Link>
-          <Link href="/trophies" className="hover:text-amber-400 transition">Trophy Case</Link>
-          <Link href="/analytics/age-production" className="hover:text-amber-400 transition">Age Matrix</Link>
-          <Link href="/constitution" className="hover:text-amber-400 transition">Constitution</Link>
+    <header className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-slate-100 shadow-lg">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Brand Logo */}
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-xl font-extrabold tracking-tight hover:opacity-90 transition-opacity"
+            >
+              <span className="text-2xl">🏆</span>
+              <span className="bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 bg-clip-text text-transparent">
+                Dynasty Hub
+              </span>
+            </Link>
+          </div>
+
+          {/* Desktop Navigation */}
+          <nav className="hidden lg:flex items-center space-x-1 font-medium text-sm">
+            {primaryNavItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all relative ${
+                    isActive
+                      ? "bg-slate-800 text-amber-400 font-semibold shadow-sm border border-slate-700/60"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  {item.icon && <span>{item.icon}</span>}
+                  <span>{item.label}</span>
+                  {item.badge && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+
+            {/* "League & History" Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setMoreDropdownOpen(!moreDropdownOpen)}
+                onBlur={() => setTimeout(() => setMoreDropdownOpen(false), 200)}
+                className="flex items-center gap-1 px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/60 transition-all focus:outline-none"
+              >
+                <span>More</span>
+                <svg
+                  className={`w-4 h-4 transition-transform duration-200 ${
+                    moreDropdownOpen ? "rotate-180" : ""
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {moreDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-2 z-50">
+                  <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-800/80 mb-1">
+                    Dynasty Tools & History
+                  </div>
+                  {leagueMoreItems.map((item) => {
+                    const isActive = pathname === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex items-center gap-2.5 px-3 py-2 text-xs font-semibold hover:bg-slate-800 transition-colors ${
+                          isActive
+                            ? "text-amber-400 bg-slate-800/50"
+                            : "text-slate-300 hover:text-white"
+                        }`}
+                      >
+                        <span>{item.icon}</span>
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </nav>
+
+          {/* Mobile Menu Button */}
+          <div className="flex lg:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              type="button"
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+              aria-label="Toggle Menu"
+            >
+              {mobileMenuOpen ? (
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
-    </nav>
+
+      {mobileMenuOpen && (
+        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 pt-2 pb-6 space-y-3 max-h-[80vh] overflow-y-auto">
+          <div className="space-y-1">
+            <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-400">
+              Main Hub
+            </div>
+            {primaryNavItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                    isActive
+                      ? "bg-slate-800 text-amber-400 border border-slate-700/80"
+                      : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {item.icon && <span>{item.icon}</span>}
+                    <span>{item.label}</span>
+                  </div>
+                  {item.badge && (
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 border-t border-slate-800/80 space-y-1">
+            <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              League & Dynasty Tools
+            </div>
+            {leagueMoreItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? "bg-slate-800 text-amber-400 font-semibold"
+                      : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+                  }`}
+                >
+                  <span>{item.icon}</span>
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </header>
   );
 }
 </file>
 
 <file path="lib/sleeper.ts">
-// lib/sleeper.ts
-
 export interface Team {
   rosterId: number;
   ownerId: string;
@@ -2637,14 +3701,37 @@ export interface WaiverTransaction {
   status: string;
 }
 
+export interface TeamMatchupDetail {
+  rosterId: number;
+  teamName: string;
+  ownerName?: string;
+  points: number;
+  projectedPoints?: number;
+  starterPoints: number;
+  benchPoints: number;
+  starters: string[];
+  bench: string[];
+  optimalLineupPoints?: number;
+  dynastyValueRank?: number;
+  personalityTrait?: string;
+}
+
+export interface WeeklyMatchupPair {
+  matchupId: number;
+  homeTeam: TeamMatchupDetail;
+  awayTeam: TeamMatchupDetail;
+  margin: number;
+}
+
+
 export async function getLeagueData() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) throw new Error("NEXT_PUBLIC_SLEEPER_LEAGUE_ID is not set");
 
   const [leagueRes, usersRes, rostersRes] = await Promise.all([
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}`, { next: { revalidate: 3600 } }),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`, { next: { revalidate: 3600 } }),
-    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`, { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId, { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users", { next: { revalidate: 3600 } }),
+    fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters", { next: { revalidate: 3600 } }),
   ]);
 
   const league = await leagueRes.json();
@@ -2655,14 +3742,14 @@ export async function getLeagueData() {
   users.forEach((u: any) => {
     const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
     const avatar = u.avatar
-      ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+      ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
       : "https://sleepercdn.com/images/v2/owners/guy_select.png";
     userMap[u.user_id] = { name: teamName, avatar };
   });
 
   const teams: Team[] = rosters.map((r: any) => {
     const owner = userMap[r.owner_id] || {
-      name: `Team ${r.roster_id}`,
+      name: "Team " + r.roster_id,
       avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png",
     };
 
@@ -2674,7 +3761,7 @@ export async function getLeagueData() {
       wins: r.settings?.wins || 0,
       losses: r.settings?.losses || 0,
       ties: r.settings?.ties || 0,
-      pointsFor: Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`),
+      pointsFor: Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0)),
       players: r.players || [],
     };
   });
@@ -2682,12 +3769,124 @@ export async function getLeagueData() {
   return { league, teams };
 }
 
+
+export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair[]> {
+  const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  if (!leagueId) return [];
+
+  try {
+    const [matchupsRes, { league, teams }] = await Promise.all([
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week, {
+        next: { revalidate: 300 },
+      }),
+      getLeagueData(),
+    ]);
+
+    if (!matchupsRes.ok) return [];
+    const matchupsRaw = await matchupsRes.json();
+    const season = league?.season || "2026";
+
+    // Fetch official Sleeper player projections for this week
+    let projectionsMap: Record<string, number> = {};
+    try {
+      const projRes = await fetch(
+        `https://api.sleeper.app/v1/projections/nfl/regular/${season}/${week}`,
+        { next: { revalidate: 3600 } }
+      );
+      if (projRes.ok) {
+        const projData = await projRes.json();
+        if (Array.isArray(projData)) {
+          projData.forEach((p: any) => {
+            if (p?.player_id && p?.stats) {
+              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
+              projectionsMap[p.player_id] = pts;
+            }
+          });
+        } else if (typeof projData === "object" && projData !== null) {
+          Object.entries(projData).forEach(([pid, p]: [string, any]) => {
+            if (p?.stats) {
+              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
+              projectionsMap[pid] = pts;
+            }
+          });
+        }
+      }
+    } catch (projErr) {
+      console.warn("Could not fetch Sleeper projections:", projErr);
+    }
+
+    const teamMap = new Map(teams.map((t) => [t.rosterId, t]));
+    const matchupGroups: Record<number, any[]> = {};
+
+    matchupsRaw.forEach((m: any) => {
+      if (m.matchup_id) {
+        if (!matchupGroups[m.matchup_id]) matchupGroups[m.matchup_id] = [];
+        matchupGroups[m.matchup_id].push(m);
+      }
+    });
+
+    const matchupPairs: WeeklyMatchupPair[] = [];
+
+    Object.entries(matchupGroups).forEach(([matchupIdStr, pair]) => {
+      if (pair.length < 2) return;
+
+      const formatTeamDetail = (m: any): TeamMatchupDetail => {
+        const team = teamMap.get(m.roster_id);
+        const starters: string[] = m.starters || [];
+        const starterPoints = (m.starters_points || []).reduce((a: number, b: number) => a + (b || 0), 0);
+        
+        const allPlayers: string[] = m.players || [];
+        const bench = allPlayers.filter((p: string) => !starters.includes(p));
+        
+        const playersPointsMap: Record<string, number> = m.players_points || {};
+        const benchPoints = bench.reduce((sum, pId) => sum + (playersPointsMap[pId] || 0), 0);
+
+        // Calculate team projected points based on starter player projections
+        let projectedPoints = starters.reduce((sum, pid) => sum + (projectionsMap[pid] || 0), 0);
+
+        // Fallback to starter points if week is already completed and projections are not returned
+        if (projectedPoints === 0 && starterPoints > 0) {
+          projectedPoints = starterPoints;
+        }
+
+        return {
+          rosterId: m.roster_id,
+          teamName: team?.name || "Team " + m.roster_id,
+          ownerName: team?.name,
+          points: m.points || 0,
+          projectedPoints: Number(projectedPoints.toFixed(2)),
+          starterPoints: Number(starterPoints.toFixed(2)),
+          benchPoints: Number(benchPoints.toFixed(2)),
+          starters,
+          bench,
+        };
+      };
+
+      const home = formatTeamDetail(pair[0]);
+      const away = formatTeamDetail(pair[1]);
+      const margin = Number(Math.abs(home.points - away.points).toFixed(2));
+
+      matchupPairs.push({
+        matchupId: Number(matchupIdStr),
+        homeTeam: home,
+        awayTeam: away,
+        margin,
+      });
+    });
+
+    return matchupPairs;
+  } catch (err) {
+    console.error("Error fetching matchups for week " + week + ":", err);
+    return [];
+  }
+}
+
 export async function getDraftPicks() {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) return [];
 
   try {
-    const res = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/traded_picks`, {
+    const res = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/traded_picks", {
       next: { revalidate: 3600 },
     });
     return await res.json();
@@ -2697,22 +3896,23 @@ export async function getDraftPicks() {
   }
 }
 
+
 export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
   const history: HistoricalSeason[] = [];
   let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
 
   while (currentLeagueId) {
     try {
-      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+      const leagueRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId, {
         next: { revalidate: 86400 },
       });
       if (!leagueRes.ok) break;
       const league = await leagueRes.json();
 
       const [usersRes, rostersRes, winnersRes] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/winners_bracket`, { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/users", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/rosters", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/winners_bracket", { next: { revalidate: 86400 } }),
       ]);
 
       const users = await usersRes.json();
@@ -2723,7 +3923,7 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
       users.forEach((u: any) => {
         const teamName = u.metadata?.team_name || u.display_name || "Unknown Team";
         const avatar = u.avatar
-          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
           : "https://sleepercdn.com/images/v2/owners/guy_select.png";
         userMap[u.user_id] = { name: teamName, avatar };
       });
@@ -2737,7 +3937,6 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
 
       let champion = null;
       let runnerUp = null;
-
       if (Array.isArray(winnersBracket) && winnersBracket.length > 0) {
         const championshipGame = winnersBracket.find((m: any) => m.p === 1 || m.r === 3);
         if (championshipGame) {
@@ -2758,13 +3957,14 @@ export async function getLeagueHistory(): Promise<HistoricalSeason[]> {
 
       currentLeagueId = league.previous_league_id || null;
     } catch (err) {
-      console.error(`Error resolving historical season ${currentLeagueId}:`, err);
+      console.error("Error resolving historical season " + currentLeagueId + ":", err);
       break;
     }
   }
 
   return history;
 }
+
 
 export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
   let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
@@ -2781,15 +3981,15 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
 
   while (currentLeagueId) {
     try {
-      const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}`, {
+      const leagueRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId, {
         next: { revalidate: 86400 },
       });
       if (!leagueRes.ok) break;
       const league = await leagueRes.json();
 
       const [usersRes, rostersRes] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/users`, { next: { revalidate: 86400 } }),
-        fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/rosters`, { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/users", { next: { revalidate: 86400 } }),
+        fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/rosters", { next: { revalidate: 86400 } }),
       ]);
 
       const users = await usersRes.json();
@@ -2799,7 +3999,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       users.forEach((u: any) => {
         const name = u.metadata?.team_name || u.display_name || "Unknown";
         const avatar = u.avatar
-          ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}`
+          ? "https://sleepercdn.com/avatars/thumbs/" + u.avatar
           : "https://sleepercdn.com/images/v2/owners/guy_select.png";
         userMap[u.user_id] = { name, avatar };
       });
@@ -2807,15 +4007,15 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       const rosterMap: Record<number, { ownerId: string; name: string; avatar: string }> = {};
       
       rosters.forEach((r: any) => {
-        const ownerId = r.owner_id || `roster_${r.roster_id}`;
-        const ownerInfo = userMap[r.owner_id] || { name: `Team ${r.roster_id}`, avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png" };
+        const ownerId = r.owner_id || "roster_" + r.roster_id;
+        const ownerInfo = userMap[r.owner_id] || { name: "Team " + r.roster_id, avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png" };
         
         rosterMap[r.roster_id] = { ownerId, name: ownerInfo.name, avatar: ownerInfo.avatar };
 
         const wins = r.settings?.wins || 0;
         const losses = r.settings?.losses || 0;
         const ties = r.settings?.ties || 0;
-        const pointsFor = Number(`${r.settings?.fpts || 0}.${r.settings?.fpts_decimal || 0}`);
+        const pointsFor = Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0));
 
         if (pointsFor > highestSeasonPoints.points) {
           highestSeasonPoints = { name: ownerInfo.name, avatar: ownerInfo.avatar, points: pointsFor, season: league.season };
@@ -2837,7 +4037,6 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
             seasons: 0,
           };
         }
-
         allTimeStats[ownerId].wins += wins;
         allTimeStats[ownerId].losses += losses;
         allTimeStats[ownerId].ties += ties;
@@ -2851,7 +4050,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
       const weekPromises = [];
       for (let w = 1; w < playStartWeek; w++) {
         weekPromises.push(
-          fetch(`https://api.sleeper.app/v1/league/${currentLeagueId}/matchups/${w}`, { next: { revalidate: 86400 } }).then((res) =>
+          fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/matchups/" + w, { next: { revalidate: 86400 } }).then((res) =>
             res.ok ? res.json().then((data) => ({ week: w, data })) : null
           )
         );
@@ -2917,7 +4116,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
 
       currentLeagueId = league.previous_league_id || null;
     } catch (err) {
-      console.error(`Error processing records for league ${currentLeagueId}:`, err);
+      console.error("Error processing records for league " + currentLeagueId + ":", err);
       break;
     }
   }
@@ -2939,6 +4138,7 @@ export async function getAllTimeRecords(): Promise<AllTimeRecordsResult> {
   };
 }
 
+
 let cachedPlayers: Record<string, Player> | null = null;
 
 export async function getPlayerMap(): Promise<Record<string, Player>> {
@@ -2954,7 +4154,7 @@ export async function getPlayerMap(): Promise<Record<string, Player>> {
       const p = rawData[id];
       playerMap[id] = {
         id,
-        name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Player",
+        name: p.full_name || (p.first_name || "") + " " + (p.last_name || "").trim() || "Unknown Player",
         position: p.position || "DEF",
         team: p.team || "FA",
         age: p.age || 0,
@@ -2969,6 +4169,7 @@ export async function getPlayerMap(): Promise<Record<string, Player>> {
   }
 }
 
+
 export async function getTransactions(): Promise<{ trades: TradeTransaction[]; waivers: WaiverTransaction[] }> {
   const leagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
   if (!leagueId) return { trades: [], waivers: [] };
@@ -2979,7 +4180,7 @@ export async function getTransactions(): Promise<{ trades: TradeTransaction[]; w
   const weekPromises = [];
   for (let w = 1; w <= 18; w++) {
     weekPromises.push(
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`, {
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/transactions/" + w, {
         next: { revalidate: 1800 },
       }).then((res) => (res.ok ? res.json() : []))
     );

@@ -7,6 +7,8 @@ export interface Team {
   losses: number;
   ties: number;
   pointsFor: number;
+  maxPointsFor?: number;
+  pointsAgainst?: number;
   players: string[];
 }
 
@@ -65,8 +67,6 @@ export interface Player {
   age: number;
 }
 
-// lib/sleeper.ts
-
 export interface TradedPick {
   season: string;
   round: number;
@@ -74,6 +74,8 @@ export interface TradedPick {
   owner_id: number;
   previous_owner_id?: number;
   originalOwnerName?: string;
+  ownerName?: string;
+  previousOwnerName?: string;
 }
 
 export interface TradeTransaction {
@@ -117,6 +119,8 @@ export interface TeamMatchupDetail {
   starters: string[];
   bench: string[];
   optimalLineupPoints?: number;
+  playersPointsMap: Record<string, number>;
+  playerNamesMap?: Record<string, string>;
   dynastyValueRank?: number;
   personalityTrait?: string;
 }
@@ -161,6 +165,12 @@ export async function getLeagueData() {
       avatar: "https://sleepercdn.com/images/v2/owners/guy_select.png",
     };
 
+    const pf = Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0));
+    const maxPf = r.settings?.ppts !== undefined
+      ? Number((r.settings?.ppts || 0) + "." + (r.settings?.ppts_decimal || 0))
+      : pf;
+    const pa = Number((r.settings?.fpts_against || 0) + "." + (r.settings?.fpts_against_decimal || 0));
+
     return {
       rosterId: r.roster_id,
       ownerId: r.owner_id,
@@ -169,7 +179,9 @@ export async function getLeagueData() {
       wins: r.settings?.wins || 0,
       losses: r.settings?.losses || 0,
       ties: r.settings?.ties || 0,
-      pointsFor: Number((r.settings?.fpts || 0) + "." + (r.settings?.fpts_decimal || 0)),
+      pointsFor: pf,
+      maxPointsFor: maxPf,
+      pointsAgainst: pa,
       players: r.players || [],
     };
   });
@@ -182,16 +194,18 @@ export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair
   if (!leagueId) return [];
 
   try {
-    const [matchupsRes, { league, teams }] = await Promise.all([
+    const [matchupsRes, { league, teams }, playerMap] = await Promise.all([
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week, {
         next: { revalidate: 300 },
       }),
       getLeagueData(),
+      getPlayerMap(),
     ]);
 
     if (!matchupsRes.ok) return [];
     const matchupsRaw = await matchupsRes.json();
     const season = league?.season || "2026";
+    const rosterPositions: string[] = league?.roster_positions || [];
 
     let projectionsMap: Record<string, number> = {};
     try {
@@ -201,25 +215,70 @@ export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair
       );
       if (projRes.ok) {
         const projData = await projRes.json();
+
+        const parseProj = (p: any): number => {
+          if (!p) return 0;
+          const stats = p.stats || p.projected_stats || p;
+          return Number(stats.pts_ppr ?? stats.pts_half_ppr ?? stats.pts_std ?? 0);
+        };
+
         if (Array.isArray(projData)) {
           projData.forEach((p: any) => {
-            if (p?.player_id && p?.stats) {
-              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
-              projectionsMap[p.player_id] = pts;
-            }
+            const pid = p?.player_id || p?.id;
+            if (pid) projectionsMap[String(pid).trim()] = parseProj(p);
           });
         } else if (typeof projData === "object" && projData !== null) {
           Object.entries(projData).forEach(([pid, p]: [string, any]) => {
-            if (p?.stats) {
-              const pts = p.stats.pts_ppr ?? p.stats.pts_half_ppr ?? p.stats.pts_std ?? 0;
-              projectionsMap[pid] = pts;
-            }
+            const cleanId = String(p?.player_id || pid).trim();
+            projectionsMap[cleanId] = parseProj(p);
           });
         }
       }
     } catch (projErr) {
       console.warn("Could not fetch Sleeper projections:", projErr);
     }
+
+    const calculateOptimalPoints = (allPlayerIds: string[], playersPointsMap: Record<string, number>): number => {
+      const starterSlots = rosterPositions.filter((pos) => pos !== "BN");
+      if (starterSlots.length === 0) return 0;
+
+      const playerList = allPlayerIds.map((id) => ({
+        id: String(id).trim(),
+        pos: playerMap[String(id).trim()]?.position || "UNKNOWN",
+        pts: playersPointsMap[String(id).trim()] || 0,
+      })).sort((a, b) => b.pts - a.pts);
+
+      const usedIds = new Set<string>();
+      let optimalSum = 0;
+
+      const primarySlots = starterSlots.filter((s) => ["QB", "RB", "WR", "TE", "K", "DEF"].includes(s));
+      const flexSlots = starterSlots.filter((s) => !["QB", "RB", "WR", "TE", "K", "DEF"].includes(s));
+
+      for (const slot of primarySlots) {
+        const best = playerList.find((p) => !usedIds.has(p.id) && p.pos === slot);
+        if (best) {
+          usedIds.add(best.id);
+          optimalSum += Math.max(0, best.pts);
+        }
+      }
+
+      for (const slot of flexSlots) {
+        const best = playerList.find((p) => {
+          if (usedIds.has(p.id)) return false;
+          if (slot === "FLEX") return ["RB", "WR", "TE"].includes(p.pos);
+          if (slot === "SUPER_FLEX") return ["QB", "RB", "WR", "TE"].includes(p.pos);
+          if (slot === "WRRB_FLEX") return ["RB", "WR"].includes(p.pos);
+          if (slot === "REC_FLEX") return ["WR", "TE"].includes(p.pos);
+          return true;
+        });
+        if (best) {
+          usedIds.add(best.id);
+          optimalSum += Math.max(0, best.pts);
+        }
+      }
+
+      return Number(optimalSum.toFixed(2));
+    };
 
     const teamMap = new Map(teams.map((t) => [t.rosterId, t]));
     const matchupGroups: Record<number, any[]> = {};
@@ -245,13 +304,36 @@ export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair
         const bench = allPlayers.filter((p: string) => !starters.includes(p));
         
         const playersPointsMap: Record<string, number> = m.players_points || {};
-        const benchPoints = bench.reduce((sum, pId) => sum + (playersPointsMap[pId] || 0), 0);
+        const benchPoints = bench.reduce((sum, pId) => sum + (playersPointsMap[String(pId).trim()] || 0), 0);
 
-        let projectedPoints = starters.reduce((sum, pid) => sum + (projectionsMap[pid] || 0), 0);
+        // Populate playerNamesMap to map IDs to actual player names
+        const playerNamesMap: Record<string, string> = {};
+        const allRosterIds = Array.from(new Set([...starters, ...allPlayers, ...Object.keys(playersPointsMap)]));
+        allRosterIds.forEach((pid) => {
+          const cleanId = String(pid).trim();
+          if (playerMap[cleanId]?.name) {
+            playerNamesMap[cleanId] = playerMap[cleanId].name;
+          }
+        });
+
+        const validStarters = starters.filter((pid) => pid && pid !== "0");
+        let projectedPoints = validStarters.reduce((sum, pid) => {
+          const cleanId = String(pid).trim();
+          return sum + (projectionsMap[cleanId] || 0);
+        }, 0);
+
+        if (projectedPoints === 0 && validStarters.length === 0 && allPlayers.length > 0) {
+          const topRosterProjs = allPlayers
+            .map((pid) => projectionsMap[String(pid).trim()] || 0)
+            .sort((a, b) => b - a);
+          projectedPoints = topRosterProjs.slice(0, 9).reduce((a, b) => a + b, 0);
+        }
 
         if (projectedPoints === 0 && starterPoints > 0) {
           projectedPoints = starterPoints;
         }
+
+        const optimalLineupPoints = calculateOptimalPoints(allPlayers, playersPointsMap);
 
         return {
           rosterId: m.roster_id,
@@ -263,6 +345,9 @@ export async function getWeeklyMatchups(week: number): Promise<WeeklyMatchupPair
           benchPoints: Number(benchPoints.toFixed(2)),
           starters,
           bench,
+          optimalLineupPoints,
+          playersPointsMap,
+          playerNamesMap,
         };
       };
 
@@ -663,4 +748,96 @@ export async function getTransactions(): Promise<{ trades: TradeTransaction[]; w
     trades: trades.sort((a, b) => b.timestamp - a.timestamp),
     waivers: waivers.sort((a, b) => b.timestamp - a.timestamp),
   };
+}
+
+export interface HeadToHeadRecord {
+  wins: number;
+  losses: number;
+  ties: number;
+}
+
+export async function getHeadToHeadMatrix(): Promise<Record<string, Record<string, HeadToHeadRecord>>> {
+  let currentLeagueId = process.env.NEXT_PUBLIC_SLEEPER_LEAGUE_ID;
+  const matrix: Record<string, Record<string, HeadToHeadRecord>> = {};
+
+  while (currentLeagueId) {
+    try {
+      const leagueRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId, {
+        next: { revalidate: 86400 },
+      });
+      if (!leagueRes.ok) break;
+      const league = await leagueRes.json();
+
+      const rostersRes = await fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/rosters", {
+        next: { revalidate: 86400 },
+      });
+      if (!rostersRes.ok) break;
+      const rosters = await rostersRes.json();
+
+      const rosterOwnerMap: Record<number, string> = {};
+      rosters.forEach((r: any) => {
+        if (r.roster_id && r.owner_id) {
+          rosterOwnerMap[r.roster_id] = r.owner_id;
+        }
+      });
+
+      const playStartWeek = league.settings?.playoff_week_start || 15;
+      const weekPromises = [];
+      for (let w = 1; w < playStartWeek; w++) {
+        weekPromises.push(
+          fetch("https://api.sleeper.app/v1/league/" + currentLeagueId + "/matchups/" + w, {
+            next: { revalidate: 86400 },
+          }).then((res) => (res.ok ? res.json() : null))
+        );
+      }
+
+      const weekResults = await Promise.all(weekPromises);
+
+      weekResults.forEach((weekObj) => {
+        if (!weekObj || !Array.isArray(weekObj)) return;
+
+        const matchupGroups: Record<number, any[]> = {};
+        weekObj.forEach((m: any) => {
+          if (m.matchup_id) {
+            if (!matchupGroups[m.matchup_id]) matchupGroups[m.matchup_id] = [];
+            matchupGroups[m.matchup_id].push(m);
+          }
+        });
+
+        Object.values(matchupGroups).forEach((pair) => {
+          if (pair.length === 2) {
+            const [teamA, teamB] = pair;
+            const ownerA = rosterOwnerMap[teamA.roster_id];
+            const ownerB = rosterOwnerMap[teamB.roster_id];
+
+            if (ownerA && ownerB && ownerA !== ownerB && teamA.points > 0 && teamB.points > 0) {
+              if (!matrix[ownerA]) matrix[ownerA] = {};
+              if (!matrix[ownerA][ownerB]) matrix[ownerA][ownerB] = { wins: 0, losses: 0, ties: 0 };
+
+              if (!matrix[ownerB]) matrix[ownerB] = {};
+              if (!matrix[ownerB][ownerA]) matrix[ownerB][ownerA] = { wins: 0, losses: 0, ties: 0 };
+
+              if (teamA.points > teamB.points) {
+                matrix[ownerA][ownerB].wins += 1;
+                matrix[ownerB][ownerA].losses += 1;
+              } else if (teamB.points > teamA.points) {
+                matrix[ownerA][ownerB].losses += 1;
+                matrix[ownerB][ownerA].wins += 1;
+              } else {
+                matrix[ownerA][ownerB].ties += 1;
+                matrix[ownerB][ownerA].ties += 1;
+              }
+            }
+          }
+        });
+      });
+
+      currentLeagueId = league.previous_league_id || null;
+    } catch (err) {
+      console.error("Error computing H2H matrix:", err);
+      break;
+    }
+  }
+
+  return matrix;
 }

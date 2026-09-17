@@ -8,7 +8,7 @@ import {
   TradedPick
 } from "@/lib/sleeper";
 import { getDynastyValues } from "@/lib/fantasycalc";
-import Link from "next/link";
+import SmartBackButton from "@/components/SmartBackButton";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -140,9 +140,9 @@ export default async function TeamDetailPage({ params }: PageProps) {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
-        <Link href="/" className="text-xs text-amber-500 hover:underline">
-          ← Back to Standings
-        </Link>
+        <div>
+          <SmartBackButton />
+        </div>
 
         {/* Header */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
